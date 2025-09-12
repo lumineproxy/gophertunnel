@@ -10,6 +10,8 @@ import (
 	"image/color"
 	"io"
 	"math"
+	"math/big"
+	"math/bits"
 	"unsafe"
 )
 
@@ -184,6 +186,30 @@ func (r *Reader) RGBA(x *color.RGBA) {
 		G: byte(v >> 8),
 		B: byte(v >> 16),
 		A: byte(v >> 24),
+	}
+}
+
+// ARGB reads a color.ARGB x from a int32.
+func (r *Reader) ARGB(x *color.RGBA) {
+	var v int32
+	r.Int32(&v)
+	*x = color.RGBA{
+		A: byte(v),
+		R: byte(v >> 8),
+		G: byte(v >> 16),
+		B: byte(v >> 24),
+	}
+}
+
+// BEARGB reads a color.ARGB x from a big endian int32.
+func (r *Reader) BEARGB(x *color.RGBA) {
+	var v int32
+	r.BEInt32(&v)
+	*x = color.RGBA{
+		A: byte(v),
+		R: byte(v >> 8),
+		G: byte(v >> 16),
+		B: byte(v >> 24),
 	}
 }
 
@@ -536,77 +562,31 @@ func (r *Reader) AbilityValue(x *any) {
 	}
 }
 
-// CompressedBiomeDefinitions reads a list of compressed biome definitions from the reader. Minecraft decided to make their
-// own type of compression for this, so we have to implement it ourselves. It uses a dictionary of repeated byte sequences
-// to reduce the size of the data. The compressed data is read byte-by-byte, and if the byte is 0xff then it is assumed
-// that the next two bytes are an int16 for the dictionary index. Otherwise, the byte is copied to the output. The dictionary
-// index is then used to look up the byte sequence to be appended to the output.
-func (r *Reader) CompressedBiomeDefinitions(x *map[string]any) {
-	var length uint32
-	header := make([]byte, 10)
-	r.Varuint32(&length)
-	if _, err := r.r.Read(header); err != nil {
-		r.panic(err)
-	}
-	if !bytes.Equal(header, []byte("COMPRESSED")) {
-		r.InvalidValue(header, "compression header", fmt.Sprintf("must be COMPRESSED (%v)", []byte("COMPRESSED")))
-		return
-	}
-
-	var dictLength uint16
-	var entryLength uint8
-	r.Uint16(&dictLength)
-	dictionary := make([][]byte, dictLength)
-	for i := 0; i < int(dictLength); i++ {
-		r.Uint8(&entryLength)
-		dictionary[i] = make([]byte, int(entryLength))
-		if _, err := r.r.Read(dictionary[i]); err != nil {
-			r.panic(err)
-		}
-	}
-
-	var decompressed []byte
-	var dictIndex int16
-	for {
-		key, err := r.r.ReadByte()
+func (r *Reader) Bitset(x *Bitset, size int) {
+	*x = NewBitset(size)
+	for i := 0; i < size; i += 7 {
+		b, err := r.r.ReadByte()
 		if err != nil {
-			break
-		}
-		if key != 0xff {
-			decompressed = append(decompressed, key)
-			continue
+			r.panic(err)
+		} else if i+bits.Len8(b) > size {
+			r.panic(errBitsetOverflow)
 		}
 
-		r.Int16(&dictIndex)
-		if dictIndex >= 0 && int(dictIndex) < len(dictionary) {
-			decompressed = append(decompressed, dictionary[dictIndex]...)
-			continue
+		bi := big.NewInt(int64(b & 0x7f))
+		x.int.Or(x.int, bi.Lsh(bi, uint(i)))
+		if b&0x80 == 0 {
+			return
 		}
-		decompressed = append(decompressed, key)
 	}
-	if err := nbt.Unmarshal(decompressed, x); err != nil {
-		r.panic(err)
-	}
+
+	r.panic(errBitsetOverflow)
 }
 
-// LimitUint32 checks if the value passed is lower than the limit passed. If not, the Reader panics.
-func (r *Reader) LimitUint32(value uint32, max uint32) {
-	if max == math.MaxUint32 {
-		// Account for 0-1 overflowing into max.
-		max = 0
-	}
-	if value > max {
-		r.panicf("uint32 %v exceeds maximum of %v", value, max)
-	}
-}
-
-// LimitInt32 checks if the value passed is lower than the limit passed and higher than the minimum. If not,
-// the Reader panics.
-func (r *Reader) LimitInt32(value int32, min, max int32) {
-	if value < min {
-		r.panicf("int32 %v exceeds minimum of %v", value, min)
-	} else if value > max {
-		r.panicf("int32 %v exceeds maximum of %v", value, max)
+// SliceLimit checks if the value passed is lower than the limit passed. If
+// not, the Reader panics.
+func (r *Reader) SliceLimit(value uint32, max uint32) {
+	if value > max && r.limitsEnabled {
+		r.panicf("slice length was too long: length of %v (max %v)", value, max)
 	}
 }
 
@@ -628,6 +608,7 @@ func (r *Reader) InvalidValue(value any, forField, reason string) {
 // errVarIntOverflow is an error set if one of the Varint methods encounters a varint that does not terminate
 // after 5 or 10 bytes, depending on the data type read into.
 var errVarIntOverflow = errors.New("varint overflows integer")
+var errBitsetOverflow = errors.New("bitset overflows size")
 
 // Varint64 reads up to 10 bytes from the underlying buffer into an int64.
 func (r *Reader) Varint64(x *int64) {

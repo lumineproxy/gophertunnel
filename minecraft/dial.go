@@ -12,28 +12,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"log/slog"
+	"math"
+	"math/rand"
+	"net"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft/auth"
+	"github.com/sandertv/gophertunnel/minecraft/internal"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"golang.org/x/oauth2"
-	"log"
-	"math/rand"
-	"net"
-	"os"
-	"strconv"
-	"strings"
-	"time"
 )
 
 // Dialer allows specifying specific settings for connection to a Minecraft server.
 // The zero value of Dialer is used for the package level Dial function.
 type Dialer struct {
-	// ErrorLog is a log.Logger that errors that occur during packet handling of servers are written to. By
-	// default, ErrorLog is set to one equal to the global logger.
-	ErrorLog *log.Logger
+	// ErrorLog is a log.Logger that errors that occur during packet handling of
+	// servers are written to. By default, errors are not logged.
+	ErrorLog *slog.Logger
 
 	// ClientData is the client data used to login to the server with. It includes fields such as the skin,
 	// locale and UUIDs unique to the client. If empty, a default is sent produced using defaultClientData().
@@ -50,6 +53,10 @@ type Dialer struct {
 	// device auth to login.
 	// If TokenSource is nil, the connection will not use authentication.
 	TokenSource oauth2.TokenSource
+
+	// XBLToken should be used in place of TokenSource if the XBL token is already known, i.e through a different
+	// oauth source. This token is for with the https://multiplayer.minecraft.net relaying party.
+	XBLToken *auth.XBLToken
 
 	// PacketFunc is called whenever a packet is read from or written to the connection returned when using
 	// Dialer.Dial(). It includes packets that are otherwise covered in the connection sequence, such as the
@@ -97,6 +104,11 @@ type Dialer struct {
 	// the client when an XUID is present without logging in.
 	// For getting this to work with BDS, authentication should be disabled.
 	KeepXBLIdentityData bool
+
+	// EnableLegacyAuth, if set to true, will use the legacy authentication behavior
+	// (pre-1.21.90) when connecting to the server. This should only be used for outdated
+	// servers, as enabling it will cause compatibility issues with updated servers.
+	EnableLegacyAuth bool
 }
 
 // Dial dials a Minecraft connection to the address passed over the network passed. The network is typically
@@ -148,19 +160,10 @@ func (d Dialer) DialTimeout(network, address string, timeout time.Duration) (*Co
 // typically "raknet". A Conn is returned which may be used to receive packets from and send packets to.
 // If a connection is not established before the context passed is cancelled, DialContext returns an error.
 func (d Dialer) DialContext(ctx context.Context, network, address string) (conn *Conn, err error) {
-	key, _ := ecdsa.GenerateKey(elliptic.P384(), cryptorand.Reader)
-
-	var chainData string
-	if d.TokenSource != nil {
-		chainData, err = authChain(ctx, d.TokenSource, key)
-		if err != nil {
-			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
-		}
-		d.IdentityData = readChainIdentityData([]byte(chainData))
-	}
 	if d.ErrorLog == nil {
-		d.ErrorLog = log.New(os.Stderr, "", log.LstdFlags)
+		d.ErrorLog = slog.New(internal.DiscardHandler{})
 	}
+	d.ErrorLog = d.ErrorLog.With("src", "dialer")
 	if d.Protocol == nil {
 		d.Protocol = DefaultProtocol
 	}
@@ -168,9 +171,30 @@ func (d Dialer) DialContext(ctx context.Context, network, address string) (conn 
 		d.FlushRate = time.Second / 20
 	}
 
-	n, ok := networkByID(network)
+	key, err := ecdsa.GenerateKey(elliptic.P384(), cryptorand.Reader)
+	if err != nil {
+		return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: fmt.Errorf("generating ECDSA key: %w", err)}
+	}
+	var chainData string
+	if d.TokenSource != nil || d.XBLToken != nil {
+		xblToken, err := getXBLToken(ctx, d)
+		if err != nil {
+			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
+		}
+		chainData, err = authChain(ctx, xblToken, key)
+		if err != nil {
+			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
+		}
+		identityData, err := readChainIdentityData([]byte(chainData))
+		if err != nil {
+			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
+		}
+		d.IdentityData = identityData
+	}
+
+	n, ok := networkByID(network, d.ErrorLog)
 	if !ok {
-		return nil, fmt.Errorf("dial: no network under id %v", network)
+		return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: fmt.Errorf("dial: no network under id %v", network)}
 	}
 
 	var pong []byte
@@ -193,6 +217,7 @@ func (d Dialer) DialContext(ctx context.Context, network, address string) (conn 
 	conn.cacheEnabled = d.EnableClientCache
 	conn.disconnectOnInvalidPacket = d.DisconnectOnInvalidPackets
 	conn.disconnectOnUnknownPacket = d.DisconnectOnUnknownPackets
+	conn.maxDecompressedLen = math.MaxInt
 
 	conn.disableEncryption = n.DisableEncryption()
 
@@ -207,47 +232,48 @@ func (d Dialer) DialContext(ctx context.Context, network, address string) (conn 
 		if !d.KeepXBLIdentityData {
 			clearXBLIdentityData(&conn.identityData)
 		}
-		request = login.EncodeOffline(conn.identityData, conn.clientData, key)
+		request = login.EncodeOffline(conn.identityData, conn.clientData, key, d.EnableLegacyAuth)
 	} else {
 		// We login as an Android device and this will show up in the 'titleId' field in the JWT chain, which
 		// we can't edit. We just enforce Android data for logging in.
 		setAndroidData(&conn.clientData)
 
-		request = login.Encode(chainData, conn.clientData, key)
+		request = login.Encode(chainData, conn.clientData, key, d.EnableLegacyAuth)
 		identityData, _, _, _ := login.Parse(request)
 		// If we got the identity data from Minecraft auth, we need to make sure we set it in the Conn too, as
 		// we are not aware of the identity data ourselves yet.
 		conn.identityData = identityData
 	}
 
-	l, c := make(chan struct{}), make(chan struct{})
-	go listenConn(conn, d.ErrorLog, l, c)
+	readyForLogin, connected := make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithCancelCause(ctx)
+	go listenConn(conn, readyForLogin, connected, cancel)
 
 	conn.expect(packet.IDNetworkSettings, packet.IDPlayStatus)
 	if err := conn.WritePacket(&packet.RequestNetworkSettings{ClientProtocol: d.Protocol.ID()}); err != nil {
-		return nil, err
+		return nil, conn.wrap(fmt.Errorf("send request network settings: %w", err), "dial")
 	}
 	_ = conn.Flush()
 
 	select {
-	case <-conn.close:
-		return nil, conn.closeErr("dial")
 	case <-ctx.Done():
-		return nil, conn.wrap(ctx.Err(), "dial")
-	case <-l:
+		return nil, conn.wrap(context.Cause(ctx), "dial")
+	case <-conn.ctx.Done():
+		return nil, conn.closeErr("dial")
+	case <-readyForLogin:
 		// We've received our network settings, so we can now send our login request.
 		conn.expect(packet.IDServerToClientHandshake, packet.IDPlayStatus)
 		if err := conn.WritePacket(&packet.Login{ConnectionRequest: request, ClientProtocol: d.Protocol.ID()}); err != nil {
-			return nil, err
+			return nil, conn.wrap(fmt.Errorf("send login: %w", err), "dial")
 		}
 		_ = conn.Flush()
 
 		select {
-		case <-conn.close:
-			return nil, conn.closeErr("dial")
 		case <-ctx.Done():
-			return nil, conn.wrap(ctx.Err(), "dial")
-		case <-c:
+			return nil, conn.wrap(context.Cause(ctx), "dial")
+		case <-conn.ctx.Done():
+			return nil, conn.closeErr("dial")
+		case <-connected:
 			// We've connected successfully. We return the connection and no error.
 			return conn, nil
 		}
@@ -256,79 +282,96 @@ func (d Dialer) DialContext(ctx context.Context, network, address string) (conn 
 
 // readChainIdentityData reads a login.IdentityData from the Mojang chain
 // obtained through authentication.
-func readChainIdentityData(chainData []byte) login.IdentityData {
+func readChainIdentityData(chainData []byte) (login.IdentityData, error) {
 	chain := struct{ Chain []string }{}
 	if err := json.Unmarshal(chainData, &chain); err != nil {
-		panic("invalid chain data from authentication: " + err.Error())
+		return login.IdentityData{}, fmt.Errorf("read chain: read json: %w", err)
 	}
 	data := chain.Chain[1]
 	claims := struct {
 		ExtraData login.IdentityData `json:"extraData"`
 	}{}
-	tok, err := jwt.ParseSigned(data)
+	tok, err := jwt.ParseSigned(data, []jose.SignatureAlgorithm{jose.ES384})
 	if err != nil {
-		panic("invalid chain data from authentication: " + err.Error())
+		return login.IdentityData{}, fmt.Errorf("read chain: parse jwt: %w", err)
 	}
 	if err := tok.UnsafeClaimsWithoutVerification(&claims); err != nil {
-		panic("invalid chain data from authentication: " + err.Error())
+		return login.IdentityData{}, fmt.Errorf("read chain: read claims: %w", err)
 	}
 	if claims.ExtraData.Identity == "" {
-		panic("chain data contained no data")
+		return login.IdentityData{}, fmt.Errorf("read chain: no extra data found")
 	}
-	return claims.ExtraData
+	return claims.ExtraData, nil
 }
 
 // listenConn listens on the connection until it is closed on another goroutine. The channel passed will
 // receive a value once the connection is logged in.
-func listenConn(conn *Conn, logger *log.Logger, l, c chan struct{}) {
+func listenConn(conn *Conn, readyForLogin, connected chan struct{}, cancel context.CancelCauseFunc) {
 	defer func() {
 		_ = conn.Close()
 	}()
+	cancelContext := true
 	for {
 		// We finally arrived at the packet decoding loop. We constantly decode packets that arrive
 		// and push them to the Conn so that they may be processed.
 		packets, err := conn.dec.Decode()
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				logger.Printf("dialer conn: %v\n", err)
+				if cancelContext {
+					cancel(err)
+				} else {
+					conn.log.Error(err.Error())
+				}
 			}
 			return
 		}
 		for _, data := range packets {
 			loggedInBefore, readyToLoginBefore := conn.loggedIn, conn.readyToLogin
 			if err := conn.receive(data); err != nil {
-				logger.Printf("dialer conn: %v", err)
+				if cancelContext {
+					cancel(err)
+				} else {
+					conn.log.Error(err.Error())
+				}
 				return
 			}
 			if !readyToLoginBefore && conn.readyToLogin {
 				// This is the signal that the connection is ready to login, so we put a value in the channel so that
 				// it may be detected.
-				l <- struct{}{}
+				readyForLogin <- struct{}{}
 			}
 			if !loggedInBefore && conn.loggedIn {
 				// This is the signal that the connection was considered logged in, so we put a value in the channel so
 				// that it may be detected.
-				c <- struct{}{}
+				cancelContext = false
+				connected <- struct{}{}
 			}
 		}
 	}
 }
 
-// authChain requests the Minecraft auth JWT chain using the credentials passed. If successful, an encoded
-// chain ready to be put in a login request is returned.
-func authChain(ctx context.Context, src oauth2.TokenSource, key *ecdsa.PrivateKey) (string, error) {
-	// Obtain the Live token, and using that the XSTS token.
-	liveToken, err := src.Token()
-	if err != nil {
-		return "", fmt.Errorf("request Live Connect token: %w", err)
-	}
-	xsts, err := auth.RequestXBLToken(ctx, liveToken, "https://multiplayer.minecraft.net/")
-	if err != nil {
-		return "", fmt.Errorf("request XBOX Live token: %w", err)
+func getXBLToken(ctx context.Context, dialer Dialer) (*auth.XBLToken, error) {
+	if dialer.XBLToken != nil {
+		return dialer.XBLToken, nil
 	}
 
+	liveToken, err := dialer.TokenSource.Token()
+	if err != nil {
+		return nil, fmt.Errorf("request Live Connect token: %w", err)
+	}
+	xblToken, err := auth.RequestXBLToken(ctx, liveToken, "https://multiplayer.minecraft.net/")
+	if err != nil {
+		return nil, fmt.Errorf("request XBOX Live token: %w", err)
+	}
+	return xblToken, nil
+}
+
+// authChain requests the Minecraft auth JWT chain using the credentials passed. If successful, an encoded
+// chain ready to be put in a login request is returned.
+func authChain(ctx context.Context, xblToken *auth.XBLToken, key *ecdsa.PrivateKey) (string, error) {
+
 	// Obtain the raw chain data using the
-	chain, err := auth.RequestMinecraftChain(ctx, xsts, key)
+	chain, err := auth.RequestMinecraftChain(ctx, xblToken, key)
 	if err != nil {
 		return "", fmt.Errorf("request Minecraft auth chain: %w", err)
 	}
@@ -347,6 +390,12 @@ func defaultClientData(address, username string, d *login.ClientData) {
 	d.ThirdPartyName = username
 	if d.DeviceOS == 0 {
 		d.DeviceOS = protocol.DeviceAndroid
+	}
+	if d.DefaultInputMode == 0 {
+		d.DefaultInputMode = packet.InputModeTouch
+	}
+	if d.CurrentInputMode == 0 {
+		d.CurrentInputMode = packet.InputModeTouch
 	}
 	if d.GameVersion == "" {
 		d.GameVersion = protocol.CurrentVersion

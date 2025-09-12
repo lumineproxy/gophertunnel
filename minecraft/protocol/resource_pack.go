@@ -1,11 +1,13 @@
 package protocol
 
+import "github.com/google/uuid"
+
 // TexturePackInfo represents a texture pack's info sent over network. It holds information about the
 // texture pack such as its name, description and version.
 type TexturePackInfo struct {
 	// UUID is the UUID of the texture pack. Each texture pack downloaded must have a different UUID in
 	// order for the client to be able to handle them properly.
-	UUID string
+	UUID uuid.UUID
 	// Version is the version of the texture pack. The client will cache texture packs sent by the server as
 	// long as they carry the same version. Sending a texture pack with a different version than previously
 	// will force the client to re-download it.
@@ -28,11 +30,14 @@ type TexturePackInfo struct {
 	AddonPack bool
 	// RTXEnabled specifies if the texture pack uses the raytracing technology introduced in 1.16.200.
 	RTXEnabled bool
+	// DownloadURL is a URL that the client can use to download the pack instead of the server sending it in
+	// chunks, which it will continue to do if this field is left empty.
+	DownloadURL string
 }
 
 // Marshal encodes/decodes a TexturePackInfo.
 func (x *TexturePackInfo) Marshal(r IO) {
-	r.String(&x.UUID)
+	r.UUID(&x.UUID)
 	r.String(&x.Version)
 	r.Uint64(&x.Size)
 	r.String(&x.ContentKey)
@@ -41,6 +46,7 @@ func (x *TexturePackInfo) Marshal(r IO) {
 	r.Bool(&x.HasScripts)
 	r.Bool(&x.AddonPack)
 	r.Bool(&x.RTXEnabled)
+	r.String(&x.DownloadURL)
 }
 
 // StackResourcePack represents a resource pack sent on the stack of the client. When sent, the client will

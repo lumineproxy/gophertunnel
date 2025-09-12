@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/df-mc/go-xsapi"
+	"math/big"
 	"net/http"
 	"time"
 
@@ -80,7 +81,10 @@ func RequestXBLToken(ctx context.Context, liveToken *oauth2.Token, relyingParty 
 
 	// We first generate an ECDSA private key which will be used to provide a 'ProofKey' to each of the
 	// requests, and to sign these requests.
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generating ECDSA key: %w", err)
+	}
 	deviceToken, err := obtainDeviceToken(ctx, c, key)
 	if err != nil {
 		return nil, err
@@ -89,7 +93,7 @@ func RequestXBLToken(ctx context.Context, liveToken *oauth2.Token, relyingParty 
 }
 
 func obtainXBLToken(ctx context.Context, c *http.Client, key *ecdsa.PrivateKey, liveToken *oauth2.Token, device *deviceToken, relyingParty string) (*XBLToken, error) {
-	data, _ := json.Marshal(map[string]any{
+	data, err := json.Marshal(map[string]any{
 		"AccessToken":       "t=" + liveToken.AccessToken,
 		"AppId":             "0000000048183522",
 		"deviceToken":       device.Token,
@@ -102,11 +106,18 @@ func obtainXBLToken(ctx context.Context, c *http.Client, key *ecdsa.PrivateKey, 
 			"alg": "ES256",
 			"use": "sig",
 			"kty": "EC",
-			"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.Bytes()),
-			"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.Bytes()),
+			"x":   base64.RawURLEncoding.EncodeToString(padTo32Bytes(key.PublicKey.X)),
+			"y":   base64.RawURLEncoding.EncodeToString(padTo32Bytes(key.PublicKey.Y)),
 		},
 	})
-	req, _ := http.NewRequestWithContext(ctx, "POST", "https://sisu.xboxlive.com/authorize", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("marshaling XBL auth request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://sisu.xboxlive.com/authorize", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("POST %v: %w", "https://sisu.xboxlive.com/authorize", err)
+	}
 	req.Header.Set("x-xbl-contract-version", "1")
 	sign(req, data, key)
 
@@ -114,9 +125,7 @@ func obtainXBLToken(ctx context.Context, c *http.Client, key *ecdsa.PrivateKey, 
 	if err != nil {
 		return nil, fmt.Errorf("POST %v: %w", "https://sisu.xboxlive.com/authorize", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		// Xbox Live returns a custom error code in the x-err header.
 		if errorCode := resp.Header.Get("x-err"); errorCode != "" {
@@ -137,7 +146,7 @@ type deviceToken struct {
 // obtainDeviceToken sends a POST request to the device auth endpoint using the ECDSA private key passed to
 // sign the request.
 func obtainDeviceToken(ctx context.Context, c *http.Client, key *ecdsa.PrivateKey) (token *deviceToken, err error) {
-	data, _ := json.Marshal(map[string]any{
+	data, err := json.Marshal(map[string]any{
 		"RelyingParty": "http://auth.xboxlive.com",
 		"TokenType":    "JWT",
 		"Properties": map[string]any{
@@ -150,12 +159,19 @@ func obtainDeviceToken(ctx context.Context, c *http.Client, key *ecdsa.PrivateKe
 				"alg": "ES256",
 				"use": "sig",
 				"kty": "EC",
-				"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.Bytes()),
-				"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.Bytes()),
+				"x":   base64.RawURLEncoding.EncodeToString(padTo32Bytes(key.PublicKey.X)),
+				"y":   base64.RawURLEncoding.EncodeToString(padTo32Bytes(key.PublicKey.Y)),
 			},
 		},
 	})
-	request, _ := http.NewRequestWithContext(ctx, "POST", "https://device.auth.xboxlive.com/device/authenticate", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("marshaling device auth request: %w", err)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, "POST", "https://device.auth.xboxlive.com/device/authenticate", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("POST %v: %w", "https://device.auth.xboxlive.com/device/authenticate", err)
+	}
 	request.Header.Set("x-xbl-contract-version", "1")
 	sign(request, data, key)
 
@@ -163,9 +179,7 @@ func obtainDeviceToken(ctx context.Context, c *http.Client, key *ecdsa.PrivateKe
 	if err != nil {
 		return nil, fmt.Errorf("POST %v: %w", "https://device.auth.xboxlive.com/device/authenticate", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("POST %v: %v", "https://device.auth.xboxlive.com/device/authenticate", resp.Status)
 	}
@@ -190,7 +204,11 @@ func sign(request *http.Request, body []byte, key *ecdsa.PrivateKey) {
 	hash.Write([]byte(request.Method))
 	hash.Write([]byte{0})
 	// Request uri path + raw query + 0 byte.
-	hash.Write([]byte(request.URL.Path + request.URL.RawQuery))
+	path := request.URL.Path
+	if rq := request.URL.RawQuery; rq != "" {
+		path += "?" + rq
+	}
+	hash.Write([]byte(path))
 	hash.Write([]byte{0})
 
 	// Authorization header if present, otherwise an empty string + 0 byte.
@@ -202,8 +220,11 @@ func sign(request *http.Request, body []byte, key *ecdsa.PrivateKey) {
 	hash.Write([]byte{0})
 
 	// Sign the checksum produced, and combine the 'r' and 's' into a single signature.
+	// Encode r and s as 32-byte, zero-padded big-endian values so the P-256 signature is always exactly 64 bytes long.
 	r, s, _ := ecdsa.Sign(rand.Reader, key, hash.Sum(nil))
-	signature := append(r.Bytes(), s.Bytes()...)
+	signature := make([]byte, 64)
+	r.FillBytes(signature[:32])
+	s.FillBytes(signature[32:])
 
 	// The signature begins with 12 bytes, the first being the signature policy version (0, 0, 0, 1) again,
 	// and the other 8 the timestamp again.
@@ -219,6 +240,15 @@ func sign(request *http.Request, body []byte, key *ecdsa.PrivateKey) {
 // accounted for.
 func windowsTimestamp() int64 {
 	return (time.Now().Unix() + 11644473600) * 10000000
+}
+
+// padTo32Bytes converts a big.Int into a fixed 32-byte, zero-padded slice.
+// This is used to ensure that the X and Y coordinates of the ECDSA public key are always 32 bytes long,
+// because big.Int.Bytes() returns a minimal encoding which may sometimes be less than 32 bytes.
+func padTo32Bytes(b *big.Int) []byte {
+	out := make([]byte, 32)
+	b.FillBytes(out)
+	return out
 }
 
 // parseXboxError returns the message associated with an Xbox Live error code.
