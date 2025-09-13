@@ -43,6 +43,10 @@ var exemptedPacks = []exemptedResourcePack{
 		uuid:    "0fba4063-dba1-4281-9b89-ff9390653530",
 		version: "1.0.0",
 	},
+	{
+		uuid:    "b41c2785-c512-4a49-af56-3a87afd47c57",
+		version: "1.21.30",
+	},
 }
 
 // Conn represents a Minecraft (Bedrock Edition) connection over a specific net.Conn transport layer. Its
