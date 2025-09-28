@@ -37,6 +37,10 @@ type Conn struct {
 	notifiersMu sync.Mutex
 }
 
+func (c *Conn) PongData(b []byte) {
+	// NOOP
+}
+
 // Signal sends a [nethernet.Signal] to a network.
 func (c *Conn) Signal(signal *nethernet.Signal) error {
 	return c.write(Message{
