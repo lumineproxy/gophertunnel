@@ -3,6 +3,7 @@ module github.com/sandertv/gophertunnel
 go 1.24.0
 
 require (
+	github.com/df-mc/jsonc v1.0.5
 	github.com/coder/websocket v1.8.14
 	github.com/df-mc/go-nethernet v0.0.0-20250326113854-da40ae9a1339
 	github.com/df-mc/go-playfab v0.0.0-20240902102459-2f8b5cd02173
@@ -12,7 +13,6 @@ require (
 	github.com/golang/snappy v1.0.0
 	github.com/google/uuid v1.6.0
 	github.com/klauspost/compress v1.18.0
-	github.com/muhammadmuzzammil1998/jsonc v1.0.0
 	github.com/pelletier/go-toml v1.9.5
 	github.com/sandertv/go-raknet v1.14.3-0.20250305181847-6af3e95113d6
 	golang.org/x/net v0.44.0
