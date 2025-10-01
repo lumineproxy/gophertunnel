@@ -923,7 +923,7 @@ func (conn *Conn) handleResourcePacksInfo(pk *packet.ResourcePacksInfo) error {
 		})
 		return nil
 	}
-	conn.expect(packet.IDResourcePackStack)
+	conn.expect(packet.IDResourcePackStack, packet.IDStartGame)
 
 	_ = conn.WritePacket(&packet.ResourcePackClientResponse{Response: packet.PackResponseAllPacksDownloaded})
 	return nil
@@ -1272,7 +1272,7 @@ func (conn *Conn) handleStartGame(pk *packet.StartGame) error {
 		UseBlockNetworkIDHashes:      pk.UseBlockNetworkIDHashes,
 	}
 	_ = conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: 16, MaxChunkRadius: 16})
-	conn.expect(packet.IDChunkRadiusUpdated, packet.IDItemRegistry)
+	conn.expect(packet.IDChunkRadiusUpdated, packet.IDItemRegistry, packet.IDResourcePackStack)
 	return nil
 }
 
