@@ -1037,6 +1037,9 @@ func (conn *Conn) handleResourcePackClientResponse(pk *packet.ResourcePackClient
 // startGame sends a StartGame packet using the game data of the connection.
 func (conn *Conn) startGame() {
 	data := conn.gameData
+	if strings.Contains(data.WorldName, "Hive Games") {
+		data.BaseGameVersion = "1.17.0"
+	}
 	_ = conn.WritePacket(&packet.StartGame{
 		Difficulty:                   data.Difficulty,
 		EntityUniqueID:               data.EntityUniqueID,
