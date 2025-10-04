@@ -3,6 +3,12 @@ package signaling
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"math/rand"
+	"net/http"
+	"net/url"
+	"strconv"
+
 	"github.com/coder/websocket"
 	"github.com/df-mc/go-nethernet"
 	"github.com/df-mc/go-playfab"
@@ -10,11 +16,6 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/franchise"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"golang.org/x/oauth2"
-	"log/slog"
-	"math/rand"
-	"net/http"
-	"net/url"
-	"strconv"
 )
 
 // Dialer provides methods and fields to establish a Conn to a signaling service.
@@ -117,5 +118,11 @@ func (d Dialer) DialWithIdentityAndEnvironment(ctx context.Context, i franchise.
 		notifiers: make(map[uint32]nethernet.Notifier),
 	}
 	go conn.read()
-	return conn, nil
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-conn.credentialsReceived:
+		return conn, nil
+	}
 }

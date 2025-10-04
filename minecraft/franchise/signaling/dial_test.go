@@ -38,7 +38,7 @@ func TestDial(t *testing.T) {
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second*15)
 	defer cancel()
 
-	conn.Notify(ctx, testNotifier{t})
+	conn.Notify(testNotifier{t})
 	if err := conn.Signal(&nethernet.Signal{
 		Type:         nethernet.SignalTypeOffer,
 		ConnectionID: rand.Uint64(),
