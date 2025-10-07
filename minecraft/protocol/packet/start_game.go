@@ -13,6 +13,14 @@ const (
 )
 
 const (
+	XBLBroadcastModeNoMultiPlay = iota
+	XBLBroadcastModeInviteOnly
+	XBLBroadcastModeFriendsOnly
+	XBLBroadcastModeFriendsOfFriends
+	XBLBroadcastModePublic
+)
+
+const (
 	ChatRestrictionLevelNone     = 0
 	ChatRestrictionLevelDropped  = 1
 	ChatRestrictionLevelDisabled = 2
@@ -295,7 +303,7 @@ func (pk *StartGame) Marshal(io protocol.IO) {
 	io.Varint32(&pk.PlatformBroadcastMode)
 	io.Bool(&pk.CommandsEnabled)
 	io.Bool(&pk.TexturePackRequired)
-	protocol.FuncSlice(io, &pk.GameRules, io.GameRule)
+	protocol.FuncSlice(io, &pk.GameRules, io.GameRuleLegacy)
 	protocol.SliceUint32Length(io, &pk.Experiments)
 	io.Bool(&pk.ExperimentsPreviouslyToggled)
 	io.Bool(&pk.BonusChestEnabled)
