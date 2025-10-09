@@ -393,7 +393,6 @@ func (d Dialer) DialHandshakeContext(ctx context.Context, network, address strin
 
 	defaultIdentityData(&conn.identityData)
 	defaultClientData(address, conn.identityData.DisplayName, &conn.clientData)
-	fmt.Printf("Server clinet data: %#v\n", conn.clientData)
 
 	var request []byte
 	if d.TokenSource == nil && d.AuthSession == nil {
