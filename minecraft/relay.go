@@ -155,6 +155,11 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 				r.Log.Error("proxy: read packet", "error", err)
 			}
+			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
+			var disc DisconnectError
+			if ok := errors.As(err, &disc); ok && r.l != nil {
+				_ = r.l.Disconnect(dst, disc.Error())
+			}
 			// Call OnDisconnect callback when connection is closed (only once)
 			disconnectOnce.Do(func() {
 				disconnect(isClientToServer)
@@ -172,6 +177,11 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 		if err := dst.WritePacket(pk); err != nil {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 				r.Log.Error("proxy: write packet", "error", err)
+			}
+			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
+			var disc DisconnectError
+			if ok := errors.As(err, &disc); ok && r.l != nil {
+				_ = r.l.Disconnect(src, disc.Error())
 			}
 			// Call OnDisconnect callback when connection is closed (only once)
 			disconnectOnce.Do(func() {
