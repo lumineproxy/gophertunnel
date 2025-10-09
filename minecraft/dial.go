@@ -86,6 +86,10 @@ type Dialer struct {
 	// are converted from and to this Protocol.
 	Protocol Protocol
 
+	// AfterHandshake is called after the login handshake is complete, but before resource packs are handled.
+	// If AfterHandshake returns a non-nil error, the connection is aborted.
+	AfterHandshake func(c *Conn) error
+
 	// FlushRate is the rate at which packets sent are flushed. Packets are buffered for a duration up to
 	// FlushRate and are compressed/encrypted together to improve compression ratios. The lower this
 	// time.Duration, the lower the latency but the less efficient both network and cpu wise.
@@ -256,9 +260,9 @@ func (d Dialer) DialContext(ctx context.Context, network, address string) (conn 
 		conn.identityData = identityData
 	}
 
-	readyForLogin, connected := make(chan struct{}), make(chan struct{})
+	readyForLogin, handshakeDone, connected := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	ctx, cancel := context.WithCancelCause(ctx)
-	go listenConn(conn, readyForLogin, connected, cancel)
+	go listenConn(d, conn, readyForLogin, handshakeDone, connected, cancel)
 
 	conn.expect(packet.IDNetworkSettings, packet.IDPlayStatus)
 	if err := conn.WritePacket(&packet.RequestNetworkSettings{ClientProtocol: d.Protocol.ID()}); err != nil {
@@ -291,6 +295,162 @@ func (d Dialer) DialContext(ctx context.Context, network, address string) (conn 
 	}
 }
 
+// DialHandshake dials a Minecraft connection to the address passed over the network passed. The network is typically
+// "raknet". A Conn is returned which may be used to receive packets from and send packets to.
+// DialHandshake returns after the login handshake is complete, but before resource packs are handled.
+func (d Dialer) DialHandshake(network, address string) (*Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	return d.DialHandshakeContext(ctx, network, address)
+}
+
+// DialHandshakeTimeout dials a Minecraft connection to the address passed over the network passed. The network is
+// typically "raknet". A Conn is returned which may be used to receive packets from and send packets to.
+// If a connection is not established before the timeout ends, DialHandshakeTimeout returns an error.
+// DialHandshakeTimeout returns after the login handshake is complete, but before resource packs are handled.
+func (d Dialer) DialHandshakeTimeout(network, address string, timeout time.Duration) (*Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return d.DialHandshakeContext(ctx, network, address)
+}
+
+// DialHandshakeContext dials a Minecraft connection to the address passed over the network passed. The network is
+// typically "raknet". A Conn is returned which may be used to receive packets from and send packets to.
+// If a connection is not established before the context passed is cancelled, DialHandshakeContext returns an error.
+// DialHandshakeContext returns after the login handshake is complete, but before resource packs are handled.
+func (d Dialer) DialHandshakeContext(ctx context.Context, network, address string) (conn *Conn, err error) {
+	if d.ErrorLog == nil {
+		d.ErrorLog = slog.New(internal.DiscardHandler{})
+	}
+	d.ErrorLog = d.ErrorLog.With("src", "dialer")
+	if d.Protocol == nil {
+		d.Protocol = DefaultProtocol
+	}
+	if d.FlushRate == 0 {
+		d.FlushRate = time.Second / 20
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P384(), cryptorand.Reader)
+	if err != nil {
+		return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: fmt.Errorf("generating ECDSA key: %w", err)}
+	}
+	var chainData string
+	var multiplayerToken string
+	if d.TokenSource != nil || d.AuthSession != nil {
+		session, err := getAuthSession(ctx, d)
+		if err != nil {
+			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
+		}
+		xblToken, err := session.LegacyMultiplayerXBL(ctx)
+		if err != nil {
+			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
+		}
+		multiplayerTok, err := session.MultiplayerToken(ctx, key)
+		if err != nil {
+			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
+		}
+		multiplayerToken = multiplayerTok.SignedToken
+		chainData, err = authChain(ctx, xblToken, key)
+		if err != nil {
+			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
+		}
+
+		identityData, err := readChainIdentityData([]byte(chainData))
+		if err != nil {
+			return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: err}
+		}
+		d.IdentityData = identityData
+	}
+
+	n, ok := networkByID(network, d.ErrorLog)
+	if !ok {
+		return nil, &net.OpError{Op: "dial", Net: "minecraft", Err: fmt.Errorf("dial: no network under id %v", network)}
+	}
+
+	var pong []byte
+	var netConn net.Conn
+	if pong, err = n.PingContext(ctx, address); err == nil {
+		netConn, err = n.DialContext(ctx, addressWithPongPort(pong, address))
+	} else {
+		netConn, err = n.DialContext(ctx, address)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	conn = newConn(netConn, key, d.ErrorLog, d.Protocol, d.FlushRate, false, n.BatchHeader())
+	conn.pool = conn.proto.Packets(false)
+	conn.identityData = d.IdentityData
+	conn.clientData = d.ClientData
+	conn.packetFunc = d.PacketFunc
+	conn.downloadResourcePack = d.DownloadResourcePack
+	conn.cacheEnabled = d.EnableClientCache
+	conn.disconnectOnInvalidPacket = d.DisconnectOnInvalidPackets
+	conn.disconnectOnUnknownPacket = d.DisconnectOnUnknownPackets
+	conn.maxDecompressedLen = math.MaxInt
+
+	conn.disableEncryption = n.DisableEncryption()
+
+	defaultIdentityData(&conn.identityData)
+	defaultClientData(address, conn.identityData.DisplayName, &conn.clientData)
+	fmt.Printf("Server clinet data: %#v\n", conn.clientData)
+
+	var request []byte
+	if d.TokenSource == nil && d.AuthSession == nil {
+		// We haven't logged into the user's XBL account. We create a login request with only one token
+		// holding the identity data set in the Dialer after making sure we clear data from the identity data
+		// that is only present when logged in.
+		if !d.KeepXBLIdentityData {
+			clearXBLIdentityData(&conn.identityData)
+		}
+		request = login.EncodeOffline(conn.identityData, conn.clientData, key, d.EnableLegacyAuth)
+	} else {
+		// We login as an Android device and this will show up in the 'titleId' field in the JWT chain, which
+		// we can't edit. We just enforce Android data for logging in.
+		setAndroidData(&conn.clientData)
+
+		request = login.Encode(chainData, multiplayerToken, conn.clientData, key, d.EnableLegacyAuth)
+		identityData, _, _, _ := login.Parse(request)
+		// If we got the identity data from Minecraft auth, we need to make sure we set it in the Conn too, as
+		// we are not aware of the identity data ourselves yet.
+		conn.identityData = identityData
+	}
+
+	readyForLogin, handshakeDone, connected := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithCancelCause(ctx)
+	go listenConn(d, conn, readyForLogin, handshakeDone, connected, cancel)
+
+	conn.expect(packet.IDNetworkSettings, packet.IDPlayStatus)
+	if err := conn.WritePacket(&packet.RequestNetworkSettings{ClientProtocol: d.Protocol.ID()}); err != nil {
+		return nil, conn.wrap(fmt.Errorf("send request network settings: %w", err), "dial")
+	}
+	_ = conn.Flush()
+
+	select {
+	case <-ctx.Done():
+		return nil, conn.wrap(context.Cause(ctx), "dial")
+	case <-conn.ctx.Done():
+		return nil, conn.closeErr("dial")
+	case <-readyForLogin:
+		// We've received our network settings, so we can now send our login request.
+		conn.expect(packet.IDServerToClientHandshake)
+		if err := conn.WritePacket(&packet.Login{ConnectionRequest: request, ClientProtocol: d.Protocol.ID()}); err != nil {
+			return nil, conn.wrap(fmt.Errorf("send login: %w", err), "dial")
+		}
+		_ = conn.Flush()
+
+		select {
+		case <-ctx.Done():
+			return nil, conn.wrap(context.Cause(ctx), "dial")
+		case <-conn.ctx.Done():
+			return nil, conn.closeErr("dial")
+		case <-handshakeDone:
+			// We've connected successfully. We return the connection and no error.
+			return conn, nil
+		}
+	}
+}
+
 // readChainIdentityData reads a login.IdentityData from the Mojang chain
 // obtained through authentication.
 func readChainIdentityData(chainData []byte) (login.IdentityData, error) {
@@ -317,7 +477,7 @@ func readChainIdentityData(chainData []byte) (login.IdentityData, error) {
 
 // listenConn listens on the connection until it is closed on another goroutine. The channel passed will
 // receive a value once the connection is logged in.
-func listenConn(conn *Conn, readyForLogin, connected chan struct{}, cancel context.CancelCauseFunc) {
+func listenConn(d Dialer, conn *Conn, readyForLogin, handshakeDone, connected chan struct{}, cancel context.CancelCauseFunc) {
 	defer func() {
 		_ = conn.Close()
 	}()
@@ -337,7 +497,7 @@ func listenConn(conn *Conn, readyForLogin, connected chan struct{}, cancel conte
 			return
 		}
 		for _, data := range packets {
-			loggedInBefore, readyToLoginBefore := conn.loggedIn, conn.readyToLogin
+			loggedInBefore, readyToLoginBefore, handshakeCompleteBefore := conn.loggedIn, conn.readyToLogin, conn.handshakeComplete
 			if err := conn.receive(data); err != nil {
 				if cancelContext {
 					cancel(err)
@@ -345,6 +505,17 @@ func listenConn(conn *Conn, readyForLogin, connected chan struct{}, cancel conte
 					conn.log.Error(err.Error())
 				}
 				return
+			}
+			if !handshakeCompleteBefore && conn.handshakeComplete {
+				if d.AfterHandshake != nil {
+					if err := d.AfterHandshake(conn); err != nil {
+						cancel(err)
+						return
+					}
+				}
+				if handshakeDone != nil {
+					close(handshakeDone)
+				}
 			}
 			if !readyToLoginBefore && conn.readyToLogin {
 				// This is the signal that the connection is ready to login, so we put a value in the channel so that
@@ -354,8 +525,10 @@ func listenConn(conn *Conn, readyForLogin, connected chan struct{}, cancel conte
 			if !loggedInBefore && conn.loggedIn {
 				// This is the signal that the connection was considered logged in, so we put a value in the channel so
 				// that it may be detected.
+				if connected != nil {
+					close(connected)
+				}
 				cancelContext = false
-				connected <- struct{}{}
 			}
 		}
 	}

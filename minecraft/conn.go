@@ -182,6 +182,8 @@ type Conn struct {
 	// readyToLogin is a bool indicating if the connection is ready to login. This is used to ensure that the client
 	// has received the relevant network settings before the login sequence starts.
 	readyToLogin bool
+	// handshakeComplete is true if the login handshake has been completed.
+	handshakeComplete bool
 	// loggedIn is a bool indicating if the connection was logged in. It is set to true after the entire login
 	// sequence is completed.
 	loggedIn bool
@@ -221,6 +223,13 @@ type Conn struct {
 	shieldID atomic.Int32
 
 	additional chan packet.Packet
+
+	disablePacketHandling bool
+}
+
+// SetDisablePacketHandling disables automatic packet handling for the connection.
+func (conn *Conn) SetDisablePacketHandling(disabled bool) {
+	conn.disablePacketHandling = disabled
 }
 
 // newConn creates a new Minecraft connection for the net.Conn passed, reading and writing compressed
@@ -681,6 +690,13 @@ func (conn *Conn) receive(data []byte) error {
 		_ = conn.close(conn.closeErr(message))
 		return nil
 	}
+	if conn.disablePacketHandling && conn.handshakeComplete {
+		select {
+		case <-conn.ctx.Done():
+		case conn.packets <- pkData:
+		}
+		return nil
+	}
 	if conn.loggedIn && !conn.waitingForSpawn.Load() {
 		select {
 		case <-conn.ctx.Done():
@@ -859,6 +875,8 @@ func (conn *Conn) handleClientToServerHandshake() error {
 		return fmt.Errorf("send PlayStatus (Status=LoginSuccess): %w", err)
 	}
 
+	conn.handshakeComplete = true
+
 	if conn.fetchResourcePacks != nil {
 		conn.resourcePacks = conn.fetchResourcePacks(conn.identityData, conn.clientData, slices.Clone(conn.resourcePacks))
 	}
@@ -929,6 +947,7 @@ func (conn *Conn) handleServerToClientHandshake(pk *packet.ServerToClientHandsha
 
 	// We write a ClientToServerHandshake packet (which has no payload) as a response.
 	_ = conn.WritePacket(&packet.ClientToServerHandshake{})
+	conn.handshakeComplete = true
 	return nil
 }
 
