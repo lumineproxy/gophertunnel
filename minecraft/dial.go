@@ -282,6 +282,7 @@ func (d Dialer) DialContext(ctx context.Context, network, address string) (conn 
 			return nil, conn.wrap(fmt.Errorf("send login: %w", err), "dial")
 		}
 		_ = conn.Flush()
+		conn.handshakeComplete = conn.disableEncryption
 
 		select {
 		case <-ctx.Done():
@@ -437,6 +438,7 @@ func (d Dialer) DialHandshakeContext(ctx context.Context, network, address strin
 			return nil, conn.wrap(fmt.Errorf("send login: %w", err), "dial")
 		}
 		_ = conn.Flush()
+		conn.handshakeComplete = conn.disableEncryption
 
 		select {
 		case <-ctx.Done():
