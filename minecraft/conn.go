@@ -864,6 +864,7 @@ func (conn *Conn) handleLogin(pk *packet.Login) error {
 	if err := conn.enableEncryption(authResult.PublicKey); err != nil {
 		return fmt.Errorf("enable encryption: %w", err)
 	}
+	conn.handshakeComplete = true
 	return nil
 }
 
