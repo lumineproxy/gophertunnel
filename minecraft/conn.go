@@ -876,8 +876,6 @@ func (conn *Conn) handleClientToServerHandshake() error {
 		return fmt.Errorf("send PlayStatus (Status=LoginSuccess): %w", err)
 	}
 
-	conn.handshakeComplete = true
-
 	if conn.fetchResourcePacks != nil {
 		conn.resourcePacks = conn.fetchResourcePacks(conn.identityData, conn.clientData, slices.Clone(conn.resourcePacks))
 	}
