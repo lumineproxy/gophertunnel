@@ -13,8 +13,8 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-// MITM is a proxy that can be used to listen for incoming connections and forward them to a remote server.
-type MITM struct {
+// Relay is a proxy that can be used to listen for incoming connections and forward them to a remote server.
+type Relay struct {
 	// Log is a logger that will be used to log errors. If nil, a new logger will be created.
 	Log *slog.Logger
 
@@ -45,40 +45,44 @@ type MITM struct {
 	// the server to the client. It can be used to modify or cancel the packet. Returning an error will cause the
 	// packet to not be forwarded. If the error is io.EOF, the packet is silently dropped.
 	OnPacket func(p packet.Packet, src, dst *Conn) error
+	// OnDisconnect is called when either the client or server connection is closed. The function receives the
+	// client connection, server connection, and a boolean indicating which connection was closed (true for client,
+	// false for server).
+	OnDisconnect func(client, server *Conn, clientDisconnected bool)
 
 	l             *Listener
 	listenNetwork string
 }
 
 // Listen starts listening for incoming connections on the given address.
-func (p *MITM) Listen(network, address string) error {
-	if p.Log == nil {
-		p.Log = slog.New(internal.DiscardHandler{})
+func (r *Relay) Listen(network, address string) error {
+	if r.Log == nil {
+		r.Log = slog.New(internal.DiscardHandler{})
 	}
-	if p.Upstream == "" {
+	if r.Upstream == "" {
 		return errors.New("proxy: upstream address not set")
 	}
 
 	var clientMu sync.Mutex
 	var client *Conn
 
-	serverDialer := p.ServerDialer
+	serverDialer := r.ServerDialer
 	serverDialer.AfterHandshake = func(server *Conn) error {
 		server.SetDisablePacketHandling(true)
 
 		clientMu.Lock()
 		defer clientMu.Unlock()
 
-		if p.OnStart != nil {
-			p.OnStart(client, server)
+		if r.OnStart != nil {
+			r.OnStart(client, server)
 		}
 
-		go p.forward(client, server)
-		go p.forward(server, client)
+		go r.forward(client, server, true)  // true indicates client->server direction
+		go r.forward(server, client, false) // false indicates server->client direction
 		return nil
 	}
 
-	cfg := p.ListenConfig
+	cfg := r.ListenConfig
 	userAfterHandshake := cfg.AfterHandshake
 	cfg.AfterHandshake = func(c *Conn) error {
 		c.SetDisablePacketHandling(true)
@@ -89,25 +93,25 @@ func (p *MITM) Listen(network, address string) error {
 
 		go func() {
 			d := serverDialer
-			if !p.UseDialerData {
+			if !r.UseDialerData {
 				d.ClientData = c.ClientData()
 				d.IdentityData = c.IdentityData()
 			}
 
-			upstreamNetwork := p.UpstreamNetwork
+			upstreamNetwork := r.UpstreamNetwork
 			if upstreamNetwork == "" {
 				upstreamNetwork = network
 			}
 
 			var err error
-			if p.DialContext != nil {
-				_, err = d.DialHandshakeContext(p.DialContext, upstreamNetwork, p.Upstream)
+			if r.DialContext != nil {
+				_, err = d.DialHandshakeContext(r.DialContext, upstreamNetwork, r.Upstream)
 			} else {
-				_, err = d.DialHandshake(upstreamNetwork, p.Upstream)
+				_, err = d.DialHandshake(upstreamNetwork, r.Upstream)
 			}
 			if err != nil {
-				p.Log.Error("proxy: dial upstream", "error", err)
-				_ = p.l.Disconnect(c, fmt.Sprintf("Unable to connect to upstream server: %v", err))
+				r.Log.Error("proxy: dial upstream", "error", err)
+				_ = r.l.Disconnect(c, fmt.Sprintf("Unable to connect to upstream server: %v", err))
 			}
 		}()
 
@@ -121,42 +125,54 @@ func (p *MITM) Listen(network, address string) error {
 	if err != nil {
 		return fmt.Errorf("proxy: listen: %w", err)
 	}
-	p.l = l
-	p.listenNetwork = network
+	r.l = l
+	r.listenNetwork = network
 	return nil
 }
 
 // Close closes the proxy listener.
-func (p *MITM) Close() error {
-	if p.l == nil {
+func (r *Relay) Close() error {
+	if r.l == nil {
 		return nil
 	}
-	return p.l.Close()
+	return r.l.Close()
 }
 
 // forward forwards packets from one connection to another.
-func (p *MITM) forward(src, dst *Conn) {
+func (r *Relay) forward(src, dst *Conn, isClientToServer bool) {
 	defer src.Close()
 	defer dst.Close()
 	for {
 		pk, err := src.ReadPacket()
 		if err != nil {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
-				p.Log.Error("proxy: read packet", "error", err)
+				r.Log.Error("proxy: read packet", "error", err)
+			}
+			// Call OnDisconnect callback when connection is closed
+			if r.OnDisconnect != nil {
+				// Determine which connection was closed based on the direction
+				clientDisconnected := isClientToServer
+				r.OnDisconnect(src, dst, clientDisconnected)
 			}
 			return
 		}
-		if p.OnPacket != nil {
-			if err := p.OnPacket(pk, src, dst); err != nil {
+		if r.OnPacket != nil {
+			if err := r.OnPacket(pk, src, dst); err != nil {
 				if !errors.Is(err, io.EOF) {
-					p.Log.Error("proxy: handle packet", "error", err)
+					r.Log.Error("proxy: handle packet", "error", err)
 				}
 				continue
 			}
 		}
 		if err := dst.WritePacket(pk); err != nil {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
-				p.Log.Error("proxy: write packet", "error", err)
+				r.Log.Error("proxy: write packet", "error", err)
+			}
+			// Call OnDisconnect callback when connection is closed
+			if r.OnDisconnect != nil {
+				// Determine which connection was closed based on the direction
+				clientDisconnected := isClientToServer
+				r.OnDisconnect(src, dst, clientDisconnected)
 			}
 			return
 		}
