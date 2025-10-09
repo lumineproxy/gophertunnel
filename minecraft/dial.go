@@ -625,6 +625,7 @@ func defaultClientData(address, username string, d *login.ClientData) {
 // setAndroidData ensures the login.ClientData passed matches settings you would see on an Android device.
 func setAndroidData(data *login.ClientData) {
 	data.DeviceOS = protocol.DeviceAndroid
+	data.DefaultInputMode = packet.InputModeTouch
 	data.GameVersion = protocol.CurrentVersion
 }
 
