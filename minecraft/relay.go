@@ -77,8 +77,15 @@ func (r *Relay) Listen(network, address string) error {
 			r.OnStart(client, server)
 		}
 
-		go r.forward(client, server, true)  // true indicates client->server direction
-		go r.forward(server, client, false) // false indicates server->client direction
+		var disconnectOnce sync.Once
+		disconnect := func(clientDisconnected bool) {
+			if r.OnDisconnect != nil {
+				r.OnDisconnect(client, server, clientDisconnected)
+			}
+		}
+
+		go r.forward(client, server, true, &disconnectOnce, disconnect)  // client->server direction
+		go r.forward(server, client, false, &disconnectOnce, disconnect) // server->client direction
 		return nil
 	}
 
@@ -139,7 +146,7 @@ func (r *Relay) Close() error {
 }
 
 // forward forwards packets from one connection to another.
-func (r *Relay) forward(src, dst *Conn, isClientToServer bool) {
+func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *sync.Once, disconnect func(bool)) {
 	defer src.Close()
 	defer dst.Close()
 	for {
@@ -148,12 +155,10 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool) {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 				r.Log.Error("proxy: read packet", "error", err)
 			}
-			// Call OnDisconnect callback when connection is closed
-			if r.OnDisconnect != nil {
-				// Determine which connection was closed based on the direction
-				clientDisconnected := isClientToServer
-				r.OnDisconnect(src, dst, clientDisconnected)
-			}
+			// Call OnDisconnect callback when connection is closed (only once)
+			disconnectOnce.Do(func() {
+				disconnect(isClientToServer)
+			})
 			return
 		}
 		if r.OnPacket != nil {
@@ -168,12 +173,10 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool) {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 				r.Log.Error("proxy: write packet", "error", err)
 			}
-			// Call OnDisconnect callback when connection is closed
-			if r.OnDisconnect != nil {
-				// Determine which connection was closed based on the direction
-				clientDisconnected := isClientToServer
-				r.OnDisconnect(src, dst, clientDisconnected)
-			}
+			// Call OnDisconnect callback when connection is closed (only once)
+			disconnectOnce.Do(func() {
+				disconnect(isClientToServer)
+			})
 			return
 		}
 	}
