@@ -38,9 +38,9 @@ type Relay struct {
 	// If nil, a default context with a 30-second timeout is used.
 	DialContext context.Context
 
-	// OnStart is called when a new client has connected and a connection to the upstream server has been established.
+	// OnConnection is called when a new client has connected and a connection to the upstream server has been established.
 	// It provides access to both connection objects.
-	OnStart func(client, server *Conn)
+	OnConnection func(client, server *Conn)
 	// OnPacket is a function that is called for each packet that is sent from the client to the server and from
 	// the server to the client. It can be used to modify or cancel the packet. Returning an error will cause the
 	// packet to not be forwarded. If the error is io.EOF, the packet is silently dropped.
@@ -73,8 +73,8 @@ func (r *Relay) Listen(network, address string) error {
 		clientMu.Lock()
 		defer clientMu.Unlock()
 
-		if r.OnStart != nil {
-			r.OnStart(client, server)
+		if r.OnConnection != nil {
+			r.OnConnection(client, server)
 		}
 
 		var disconnectOnce sync.Once
