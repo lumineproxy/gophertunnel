@@ -691,6 +691,9 @@ func (conn *Conn) receive(data []byte) error {
 		return nil
 	}
 	if conn.disablePacketHandling && conn.handshakeComplete {
+		if pkData.h.PacketID == packet.IDClientToServerHandshake {
+			return nil // dont forward it
+		}
 		select {
 		case <-conn.ctx.Done():
 		case conn.packets <- pkData:
