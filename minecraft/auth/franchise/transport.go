@@ -4,14 +4,21 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/sandertv/gophertunnel/minecraft/auth/authclient"
 )
 
 type Transport struct {
 	IdentityProvider IdentityProvider
-	Base             http.RoundTripper
+	// AuthClient is the client used to make requests to the Microsoft authentication servers. If nil,
+	// auth.DefaultClient is used. This can be used to provide a timeout or proxy settings to the client.
+	AuthClient *authclient.AuthClient
 }
 
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.AuthClient == nil {
+		t.AuthClient = authclient.DefaultClient
+	}
 	reqBodyClosed := false
 	if req.Body != nil {
 		defer func() {
@@ -28,7 +35,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("request token config: %w", err)
 	}
-	token, err := config.Token()
+	token, err := config.Token(req.Context(), t.AuthClient)
 	if err != nil {
 		return nil, fmt.Errorf("request token: %w", err)
 	}
@@ -41,10 +48,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func (t *Transport) base() http.RoundTripper {
-	if t.Base != nil {
-		return t.Base
+	if t.AuthClient.HTTPClient().Transport != nil {
+		return t.AuthClient.HTTPClient().Transport
 	}
-	return http.DefaultTransport
+	return authclient.DefaultClient.HTTPClient().Transport
 }
 
 // cloneRequest returns a clone of the provided *http.Request.

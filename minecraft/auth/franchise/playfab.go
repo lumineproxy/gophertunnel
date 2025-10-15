@@ -3,6 +3,7 @@ package franchise
 import (
 	"errors"
 	"fmt"
+
 	"github.com/df-mc/go-playfab"
 	"github.com/df-mc/go-playfab/title"
 )
@@ -66,12 +67,12 @@ func (i PlayFabIdentityProvider) TokenConfig() (*TokenConfig, error) {
 		return nil, fmt.Errorf("login: %w", err)
 	}
 
-	user := *i.UserConfig
+	user := i.UserConfig
 	user.Token = identity.SessionTicket
 	user.TokenType = TokenTypePlayFab
 
 	return &TokenConfig{
-		Device: *i.DeviceConfig,
+		Device: i.DeviceConfig,
 		User:   user,
 
 		Environment: i.Environment,

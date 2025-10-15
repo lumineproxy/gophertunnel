@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"net/http"
 	"net/url"
 	"strconv"
 
 	"github.com/coder/websocket"
 	"github.com/df-mc/go-nethernet"
 	"github.com/df-mc/go-playfab"
+	"github.com/sandertv/gophertunnel/minecraft/auth/authclient"
+	"github.com/sandertv/gophertunnel/minecraft/auth/franchise"
 	"github.com/sandertv/gophertunnel/minecraft/auth/xal"
-	"github.com/sandertv/gophertunnel/minecraft/franchise"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"golang.org/x/oauth2"
 )
@@ -36,6 +36,9 @@ type Dialer struct {
 	// Log is used to logging messages at various levels. If nil, the default
 	// [slog.Logger] will be set from [slog.Default].
 	Log *slog.Logger
+	// AuthClient is the client used to make requests to the Microsoft authentication servers. If nil,
+	// auth.DefaultClient is used. This can be used to provide a timeout or proxy settings to the client.
+	AuthClient *authclient.AuthClient
 }
 
 // DialContext establishes a Conn to the signaling service using the [oauth2.TokenSource] for
@@ -43,7 +46,10 @@ type Dialer struct {
 // and [Environment] needed, then calls DialWithIdentityAndEnvironment internally. It is the
 // method that is typically used when no configuration of identity and environment is required.
 func (d Dialer) DialContext(ctx context.Context, src oauth2.TokenSource) (*Conn, error) {
-	discovery, err := franchise.Discover(protocol.CurrentVersion)
+	if d.AuthClient == nil {
+		d.AuthClient = authclient.DefaultClient
+	}
+	discovery, err := franchise.Discover(ctx, d.AuthClient, protocol.CurrentVersion)
 	if err != nil {
 		return nil, fmt.Errorf("obtain discovery: %w", err)
 	}
@@ -74,7 +80,10 @@ func (d Dialer) DialWithIdentityAndEnvironment(ctx context.Context, i franchise.
 		d.Options = &websocket.DialOptions{}
 	}
 	if d.Options.HTTPClient == nil {
-		d.Options.HTTPClient = &http.Client{}
+		if d.AuthClient == nil {
+			d.AuthClient = authclient.DefaultClient
+		}
+		d.Options.HTTPClient = d.AuthClient.HTTPClient()
 	}
 	if d.NetworkID == 0 {
 		d.NetworkID = rand.Uint64()
@@ -93,7 +102,7 @@ func (d Dialer) DialWithIdentityAndEnvironment(ctx context.Context, i franchise.
 	if !hasTransport {
 		d.Options.HTTPClient.Transport = &franchise.Transport{
 			IdentityProvider: i,
-			Base:             base,
+			AuthClient:       d.AuthClient,
 		}
 	}
 
