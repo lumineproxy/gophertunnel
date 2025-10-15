@@ -687,7 +687,7 @@ func (conn *Conn) receive(data []byte) error {
 				message = "Unknown disconnect reason"
 			}
 		}
-		_ = conn.close(conn.closeErr(message))
+		_ = conn.close(conn.wrap(DisconnectError(message), "receive"))
 		return nil
 	}
 	if conn.disablePacketHandling && conn.handshakeComplete {
