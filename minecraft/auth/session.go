@@ -11,6 +11,7 @@ import (
 	"github.com/df-mc/go-playfab"
 	"github.com/df-mc/go-playfab/title"
 	"github.com/google/uuid"
+	"github.com/sandertv/gophertunnel/minecraft/auth/authclient"
 	"github.com/sandertv/gophertunnel/minecraft/auth/franchise"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"golang.org/x/oauth2"
@@ -18,6 +19,7 @@ import (
 )
 
 type Session struct {
+	authClient           *authclient.AuthClient
 	env                  franchise.AuthorizationEnvironment
 	obtainer             *XBLTokenObtainer
 	legacyMultiplayerXBL *XBLToken
@@ -29,8 +31,8 @@ type Session struct {
 }
 
 // SessionFromTokenSource creates a session from an XBOX token source and returns it.
-func SessionFromTokenSource(src oauth2.TokenSource, deviceType Device, ctx context.Context) (s *Session, err error) {
-	s = &Session{src: src, deviceType: deviceType}
+func SessionFromTokenSource(authClient *authclient.AuthClient, src oauth2.TokenSource, deviceType Device, ctx context.Context) (*Session, error) {
+	s := &Session{authClient: authClient, src: src, deviceType: deviceType}
 	if err := s.login(ctx); err != nil {
 		return nil, err
 	}
@@ -42,7 +44,7 @@ func (s *Session) login(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("request token: %w", err)
 	}
-	err = s.initDiscovery()
+	err = s.initDiscovery(ctx)
 	if err != nil {
 		return fmt.Errorf("init discovery: %w", err)
 	}
@@ -69,20 +71,20 @@ func (s *Session) login(ctx context.Context) error {
 		Environment: &s.env,
 	}
 
-	s.obtainer, err = NewXBLTokenObtainer(tok, s.deviceType, ctx)
+	s.obtainer, err = NewXBLTokenObtainer(ctx, s.deviceType, s.authClient, tok, s.src)
 	if err != nil {
 		return fmt.Errorf("obtain device token: %w", err)
 	}
 
 	if err = s.loginWithPlayfab(ctx); err != nil {
-		return err
+		return fmt.Errorf("login with playfab: %w", err)
 	}
 
 	return s.obtainMcToken(ctx)
 }
 
-func (s *Session) initDiscovery() error {
-	discovery, err := franchise.Discover(protocol.CurrentVersion)
+func (s *Session) initDiscovery(ctx context.Context) error {
+	discovery, err := franchise.Discover(ctx, s.authClient, protocol.CurrentVersion)
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}
@@ -94,7 +96,7 @@ func (s *Session) initDiscovery() error {
 	return nil
 }
 
-func (s *Session) loginWithPlayfab(ctx context.Context) (err error) {
+func (s *Session) loginWithPlayfab(ctx context.Context) error {
 	playfabXBL, err := s.obtainer.RequestXBLToken(ctx, "http://playfab.xboxlive.com/")
 	if err != nil {
 		return fmt.Errorf("request playfab token: %w", err)
@@ -107,19 +109,19 @@ func (s *Session) loginWithPlayfab(ctx context.Context) (err error) {
 		},
 	}.Login(playfabXBL)
 	if err != nil {
-		return fmt.Errorf("error logging in to playfab: %w", err)
+		return fmt.Errorf("logging in: %w", err)
 	}
 
 	return nil
 }
 
-func (s *Session) obtainMcToken(ctx context.Context) (err error) {
+func (s *Session) obtainMcToken(ctx context.Context) error {
 	playfabIdentity, err := s.PlayfabIdentity(ctx)
 	if err != nil {
 		return err
 	}
 	s.conf.User.Token = playfabIdentity.SessionTicket
-	s.mcToken, err = s.conf.Token()
+	s.mcToken, err = s.conf.Token(ctx, s.authClient)
 	if err != nil {
 		return fmt.Errorf("start session: %w", err)
 	}
@@ -133,6 +135,9 @@ func (s *Session) Obtainer() *XBLTokenObtainer {
 
 // PlayfabIdentity returns the user's Playfab identity, which includes the session ticket.
 func (s *Session) PlayfabIdentity(ctx context.Context) (*playfab.Identity, error) {
+	if s.playfabIdentity == nil {
+		return nil, fmt.Errorf("playfab identity not initialized (login() was not called)")
+	}
 	if pastExpirationTime(s.playfabIdentity.EntityToken.Expiration) {
 		if err := s.loginWithPlayfab(ctx); err != nil {
 			return nil, err
@@ -164,12 +169,12 @@ func (s *Session) LegacyMultiplayerXBL(ctx context.Context) (tok *XBLToken, err 
 
 // MultiplayerToken requests a multiplayer token from Microsoft. The token can be reused, but is not
 // reused by the vanilla client. Calling SetKey will clear the saved token.
-func (s *Session) MultiplayerToken(ctx context.Context, key *ecdsa.PrivateKey) (tok *franchise.MultiplayerToken, err error) {
+func (s *Session) MultiplayerToken(ctx context.Context, key *ecdsa.PrivateKey) (*franchise.MultiplayerToken, error) {
 	mcToken, err := s.MCToken(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("obtain MCToken: %w", err)
 	}
-	return franchise.RequestMultiplayerToken(ctx, s.env, mcToken, key)
+	return franchise.RequestMultiplayerToken(ctx, s.authClient, s.env, mcToken, key)
 }
 
 const expirationTimeDelta = time.Minute
