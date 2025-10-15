@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/df-mc/go-xsapi"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft/auth/authclient"
 	"golang.org/x/oauth2"
@@ -72,6 +73,18 @@ type authorizationToken struct {
 
 func (t authorizationToken) Expired() bool {
 	return time.Now().After(t.NotAfter.Add(-time.Minute * 5))
+}
+
+// String returns a string that may be used for the 'Authorization' header used for Minecraft
+// related endpoints that need an XBOX Live authenticated caller.
+func (t XBLToken) String() string {
+	return fmt.Sprintf("XBL3.0 x=%s;%s", t.AuthorizationToken.DisplayClaims.UserInfo[0].UserHash, t.AuthorizationToken.Token)
+}
+
+// DisplayClaims returns a [xsapi.DisplayClaims] from the token. It can be used by the XSAPI
+// package to include display claims in requests that require them.
+func (t XBLToken) DisplayClaims() xsapi.DisplayClaims {
+	return t.AuthorizationToken.DisplayClaims.UserInfo[0]
 }
 
 // SetAuthHeader returns a string that may be used for the 'Authorization' header used for Minecraft
