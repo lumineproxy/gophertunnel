@@ -65,7 +65,7 @@ func (d Dialer) DialContext(ctx context.Context, src oauth2.TokenSource) (*Conn,
 	return d.DialWithIdentityAndEnvironment(ctx, franchise.PlayFabIdentityProvider{
 		Environment: a,
 		IdentityProvider: playfab.XBLIdentityProvider{
-			TokenSource: xal.RefreshTokenSource(src, playfab.RelyingParty),
+			TokenSource: xal.RefreshTokenSource(src, d.AuthClient, playfab.RelyingParty),
 		},
 	}, s)
 }
