@@ -10,6 +10,7 @@ import (
 
 type Transport struct {
 	IdentityProvider IdentityProvider
+	Base             http.RoundTripper
 	// AuthClient is the client used to make requests to the Microsoft authentication servers. If nil,
 	// auth.DefaultClient is used. This can be used to provide a timeout or proxy settings to the client.
 	AuthClient *authclient.AuthClient
@@ -48,10 +49,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func (t *Transport) base() http.RoundTripper {
-	if t.AuthClient.HTTPClient().Transport != nil {
-		return t.AuthClient.HTTPClient().Transport
+	if t.Base != nil {
+		return t.Base
 	}
-	return authclient.DefaultClient.HTTPClient().Transport
+	return http.DefaultTransport
 }
 
 // cloneRequest returns a clone of the provided *http.Request.

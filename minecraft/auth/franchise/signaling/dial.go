@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"strconv"
 
@@ -80,16 +81,16 @@ func (d Dialer) DialWithIdentityAndEnvironment(ctx context.Context, i franchise.
 		d.Options = &websocket.DialOptions{}
 	}
 	if d.Options.HTTPClient == nil {
-		if d.AuthClient == nil {
-			d.AuthClient = authclient.DefaultClient
-		}
-		d.Options.HTTPClient = d.AuthClient.HTTPClient()
+		d.Options.HTTPClient = &http.Client{}
 	}
 	if d.NetworkID == 0 {
 		d.NetworkID = rand.Uint64()
 	}
 	if d.Log == nil {
 		d.Log = slog.Default()
+	}
+	if d.AuthClient == nil {
+		d.AuthClient = authclient.DefaultClient
 	}
 
 	var (
@@ -102,6 +103,7 @@ func (d Dialer) DialWithIdentityAndEnvironment(ctx context.Context, i franchise.
 	if !hasTransport {
 		d.Options.HTTPClient.Transport = &franchise.Transport{
 			IdentityProvider: i,
+			Base:             base,
 			AuthClient:       d.AuthClient,
 		}
 	}
