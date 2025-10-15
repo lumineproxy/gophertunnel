@@ -158,7 +158,6 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
 			var disc DisconnectError
 			if ok := errors.As(err, &disc); ok && r.l != nil {
-				fmt.Printf("Got ddisc error: %s\n", disc)
 				_ = r.l.Disconnect(dst, disc.Error())
 			}
 			// Call OnDisconnect callback when connection is closed (only once)
@@ -182,7 +181,6 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
 			var disc DisconnectError
 			if ok := errors.As(err, &disc); ok && r.l != nil {
-				fmt.Printf("Got ddisc error: %s\n", disc)
 				_ = r.l.Disconnect(src, disc.Error())
 			}
 			// Call OnDisconnect callback when connection is closed (only once)
