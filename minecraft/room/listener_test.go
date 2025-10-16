@@ -14,8 +14,9 @@ import (
 
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/auth"
+	"github.com/sandertv/gophertunnel/minecraft/auth/authclient"
+	"github.com/sandertv/gophertunnel/minecraft/auth/franchise/signaling"
 	"github.com/sandertv/gophertunnel/minecraft/auth/xal"
-	"github.com/sandertv/gophertunnel/minecraft/franchise/signaling"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"golang.org/x/oauth2"
 )
@@ -43,7 +44,7 @@ func TestListen(t *testing.T) {
 		}
 	})
 
-	x, err := xal.RefreshTokenSource(src, "http://xboxlive.com").Token()
+	x, err := xal.RefreshTokenSource(src, authclient.DefaultClient, "http://xboxlive.com").Token()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func TestListen(t *testing.T) {
 			},
 			ListenConfig: ListenConfig{
 				Announcer: &XBLAnnouncer{
-					TokenSource: xal.RefreshTokenSource(src, "http://xboxlive.com"),
+					TokenSource: xal.RefreshTokenSource(src, authclient.DefaultClient, "http://xboxlive.com"),
 				},
 				StatusProvider: NewStatusProvider(status),
 			},
