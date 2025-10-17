@@ -131,15 +131,9 @@ func (r *Relay) Listen(network, address string) error {
 				_, err = d.DialHandshake(upstreamNetwork, r.Upstream)
 			}
 			if err != nil {
-				r.Log.Error("proxy: dial upstream failed",
-					"\n  error", err,
-					"\n  error_type", fmt.Sprintf("%T", err),
-					"\n  upstream_address", r.Upstream,
-					"\n  upstream_network", upstreamNetwork,
-					"\n  client_addr", c.RemoteAddr(),
-					"\n  client_identity", c.IdentityData().DisplayName,
-					"\n  use_dialer_data", r.UseDialerData,
-				)
+				errorMsg := fmt.Sprintf("proxy: dial upstream failed - error: %v, type: %T, upstream: %s, network: %s, client: %s, identity: %s, use_dialer_data: %v",
+					err, err, r.Upstream, upstreamNetwork, c.RemoteAddr(), c.IdentityData().DisplayName, r.UseDialerData)
+				r.Log.Error(errorMsg)
 				_ = r.l.Disconnect(c, fmt.Sprintf("Unable to connect to upstream server: %v", err.Error()))
 			}
 		}()
@@ -180,19 +174,9 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 					direction = "server->client"
 				}
 
-				r.Log.Error("proxy: read packet error",
-					"\n  error", err,
-					"\n  error_type", fmt.Sprintf("%T", err),
-					"\n  direction", direction,
-					"\n  src_addr", src.RemoteAddr(),
-					"\n  dst_addr", dst.RemoteAddr(),
-					"\n  src_identity", src.IdentityData().DisplayName,
-					"\n  dst_identity", dst.IdentityData().DisplayName,
-					"\n  src_logged_in", src.loggedIn,
-					"\n  dst_logged_in", dst.loggedIn,
-					"\n  src_handshake_complete", src.handshakeComplete,
-					"\n  dst_handshake_complete", dst.handshakeComplete,
-				)
+				errorMsg := fmt.Sprintf("proxy: read packet error - error: %v, type: %T, direction: %s, src_addr: %s, dst_addr: %s, src_identity: %s, dst_identity: %s, src_logged_in: %v, dst_logged_in: %v, src_handshake_complete: %v, dst_handshake_complete: %v",
+					err, err, direction, src.RemoteAddr(), dst.RemoteAddr(), src.IdentityData().DisplayName, dst.IdentityData().DisplayName, src.loggedIn, dst.loggedIn, src.handshakeComplete, dst.handshakeComplete)
+				r.Log.Error(errorMsg)
 			}
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
 			var disc DisconnectError
@@ -213,17 +197,9 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 						direction = "server->client"
 					}
 
-					r.Log.Error("proxy: handle packet error",
-						"\n  error", err,
-						"\n  error_type", fmt.Sprintf("%T", err),
-						"\n  packet_id", pk.ID(),
-						"\n  packet_type", fmt.Sprintf("%T", pk),
-						"\n  direction", direction,
-						"\n  src_addr", src.RemoteAddr(),
-						"\n  dst_addr", dst.RemoteAddr(),
-						"\n  src_identity", src.IdentityData().DisplayName,
-						"\n  dst_identity", dst.IdentityData().DisplayName,
-					)
+					errorMsg := fmt.Sprintf("proxy: handle packet error - error: %v, type: %T, packet_id: %d, packet_type: %T, direction: %s, src_addr: %s, dst_addr: %s, src_identity: %s, dst_identity: %s",
+						err, err, pk.ID(), pk, direction, src.RemoteAddr(), dst.RemoteAddr(), src.IdentityData().DisplayName, dst.IdentityData().DisplayName)
+					r.Log.Error(errorMsg)
 				}
 				continue
 			}
@@ -235,21 +211,9 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 					direction = "server->client"
 				}
 
-				r.Log.Error("proxy: write packet error",
-					"\n  error", err,
-					"\n  error_type", fmt.Sprintf("%T", err),
-					"\n  packet_id", pk.ID(),
-					"\n  packet_type", fmt.Sprintf("%T", pk),
-					"\n  direction", direction,
-					"\n  src_addr", src.RemoteAddr(),
-					"\n  dst_addr", dst.RemoteAddr(),
-					"\n  src_identity", src.IdentityData().DisplayName,
-					"\n  dst_identity", dst.IdentityData().DisplayName,
-					"\n  src_logged_in", src.loggedIn,
-					"\n  dst_logged_in", dst.loggedIn,
-					"\n  src_handshake_complete", src.handshakeComplete,
-					"\n  dst_handshake_complete", dst.handshakeComplete,
-				)
+				errorMsg := fmt.Sprintf("proxy: write packet error - error: %v, type: %T, packet_id: %d, packet_type: %T, direction: %s, src_addr: %s, dst_addr: %s, src_identity: %s, dst_identity: %s, src_logged_in: %v, dst_logged_in: %v, src_handshake_complete: %v, dst_handshake_complete: %v",
+					err, err, pk.ID(), pk, direction, src.RemoteAddr(), dst.RemoteAddr(), src.IdentityData().DisplayName, dst.IdentityData().DisplayName, src.loggedIn, dst.loggedIn, src.handshakeComplete, dst.handshakeComplete)
+				r.Log.Error(errorMsg)
 			}
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
 			var disc DisconnectError
