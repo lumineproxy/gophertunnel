@@ -7,11 +7,25 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/sandertv/gophertunnel/minecraft/internal"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
+
+// isNormalDisconnectError checks if the error is a normal disconnection that shouldn't be logged.
+func isNormalDisconnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	return strings.Contains(errStr, "context canceled") ||
+		strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection aborted")
+}
 
 // Relay is a proxy that can be used to listen for incoming connections and forward them to a remote server.
 type Relay struct {
@@ -118,13 +132,13 @@ func (r *Relay) Listen(network, address string) error {
 			}
 			if err != nil {
 				r.Log.Error("proxy: dial upstream failed",
-					"error", err,
-					"error_type", fmt.Sprintf("%T", err),
-					"upstream_address", r.Upstream,
-					"upstream_network", upstreamNetwork,
-					"client_addr", c.RemoteAddr(),
-					"client_identity", c.IdentityData().DisplayName,
-					"use_dialer_data", r.UseDialerData,
+					"\n  error", err,
+					"\n  error_type", fmt.Sprintf("%T", err),
+					"\n  upstream_address", r.Upstream,
+					"\n  upstream_network", upstreamNetwork,
+					"\n  client_addr", c.RemoteAddr(),
+					"\n  client_identity", c.IdentityData().DisplayName,
+					"\n  use_dialer_data", r.UseDialerData,
 				)
 				_ = r.l.Disconnect(c, fmt.Sprintf("Unable to connect to upstream server: %v", err.Error()))
 			}
@@ -160,24 +174,24 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 	for {
 		pk, err := src.ReadPacket()
 		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isNormalDisconnectError(err) {
+				direction := "client->server"
+				if !isClientToServer {
+					direction = "server->client"
+				}
+
 				r.Log.Error("proxy: read packet error",
-					"error", err,
-					"error_type", fmt.Sprintf("%T", err),
-					"direction", func() string {
-						if isClientToServer {
-							return "client->server"
-						}
-						return "server->client"
-					}(),
-					"src_addr", src.RemoteAddr(),
-					"dst_addr", dst.RemoteAddr(),
-					"src_identity", src.IdentityData().DisplayName,
-					"dst_identity", dst.IdentityData().DisplayName,
-					"src_logged_in", src.loggedIn,
-					"dst_logged_in", dst.loggedIn,
-					"src_handshake_complete", src.handshakeComplete,
-					"dst_handshake_complete", dst.handshakeComplete,
+					"\n  error", err,
+					"\n  error_type", fmt.Sprintf("%T", err),
+					"\n  direction", direction,
+					"\n  src_addr", src.RemoteAddr(),
+					"\n  dst_addr", dst.RemoteAddr(),
+					"\n  src_identity", src.IdentityData().DisplayName,
+					"\n  dst_identity", dst.IdentityData().DisplayName,
+					"\n  src_logged_in", src.loggedIn,
+					"\n  dst_logged_in", dst.loggedIn,
+					"\n  src_handshake_complete", src.handshakeComplete,
+					"\n  dst_handshake_complete", dst.handshakeComplete,
 				)
 			}
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
@@ -194,47 +208,47 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 		if r.OnPacket != nil {
 			if err := r.OnPacket(pk, src, dst); err != nil {
 				if !errors.Is(err, io.EOF) {
+					direction := "client->server"
+					if !isClientToServer {
+						direction = "server->client"
+					}
+
 					r.Log.Error("proxy: handle packet error",
-						"error", err,
-						"error_type", fmt.Sprintf("%T", err),
-						"packet_id", pk.ID(),
-						"packet_type", fmt.Sprintf("%T", pk),
-						"direction", func() string {
-							if isClientToServer {
-								return "client->server"
-							}
-							return "server->client"
-						}(),
-						"src_addr", src.RemoteAddr(),
-						"dst_addr", dst.RemoteAddr(),
-						"src_identity", src.IdentityData().DisplayName,
-						"dst_identity", dst.IdentityData().DisplayName,
+						"\n  error", err,
+						"\n  error_type", fmt.Sprintf("%T", err),
+						"\n  packet_id", pk.ID(),
+						"\n  packet_type", fmt.Sprintf("%T", pk),
+						"\n  direction", direction,
+						"\n  src_addr", src.RemoteAddr(),
+						"\n  dst_addr", dst.RemoteAddr(),
+						"\n  src_identity", src.IdentityData().DisplayName,
+						"\n  dst_identity", dst.IdentityData().DisplayName,
 					)
 				}
 				continue
 			}
 		}
 		if err := dst.WritePacket(pk); err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isNormalDisconnectError(err) {
+				direction := "client->server"
+				if !isClientToServer {
+					direction = "server->client"
+				}
+
 				r.Log.Error("proxy: write packet error",
-					"error", err,
-					"error_type", fmt.Sprintf("%T", err),
-					"packet_id", pk.ID(),
-					"packet_type", fmt.Sprintf("%T", pk),
-					"direction", func() string {
-						if isClientToServer {
-							return "client->server"
-						}
-						return "server->client"
-					}(),
-					"src_addr", src.RemoteAddr(),
-					"dst_addr", dst.RemoteAddr(),
-					"src_identity", src.IdentityData().DisplayName,
-					"dst_identity", dst.IdentityData().DisplayName,
-					"src_logged_in", src.loggedIn,
-					"dst_logged_in", dst.loggedIn,
-					"src_handshake_complete", src.handshakeComplete,
-					"dst_handshake_complete", dst.handshakeComplete,
+					"\n  error", err,
+					"\n  error_type", fmt.Sprintf("%T", err),
+					"\n  packet_id", pk.ID(),
+					"\n  packet_type", fmt.Sprintf("%T", pk),
+					"\n  direction", direction,
+					"\n  src_addr", src.RemoteAddr(),
+					"\n  dst_addr", dst.RemoteAddr(),
+					"\n  src_identity", src.IdentityData().DisplayName,
+					"\n  dst_identity", dst.IdentityData().DisplayName,
+					"\n  src_logged_in", src.loggedIn,
+					"\n  dst_logged_in", dst.loggedIn,
+					"\n  src_handshake_complete", src.handshakeComplete,
+					"\n  dst_handshake_complete", dst.handshakeComplete,
 				)
 			}
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
