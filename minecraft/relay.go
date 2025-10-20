@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/sandertv/gophertunnel/minecraft/internal"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -40,7 +41,7 @@ type Relay struct {
 	ServerDialer Dialer
 	// UseDialerData, if true, causes the proxy to use the ClientData and IdentityData from the ServerDialer
 	// field, rather than the data from the connecting client.
-	UseDialerData bool
+	FetchDialerData func(identityData login.IdentityData, clientData login.ClientData) (login.IdentityData, login.ClientData)
 
 	// UpstreamNetwork is the network type of the upstream server, for example "raknet". If empty, the listener's
 	// network type is used.
@@ -114,9 +115,8 @@ func (r *Relay) Listen(network, address string) error {
 
 		go func() {
 			d := serverDialer
-			if !r.UseDialerData {
-				d.ClientData = c.ClientData()
-				d.IdentityData = c.IdentityData()
+			if r.FetchDialerData != nil {
+				d.IdentityData, d.ClientData = r.FetchDialerData(c.IdentityData(), c.ClientData())
 			}
 
 			upstreamNetwork := r.UpstreamNetwork
@@ -131,8 +131,8 @@ func (r *Relay) Listen(network, address string) error {
 				_, err = d.DialHandshake(upstreamNetwork, r.Upstream)
 			}
 			if err != nil {
-				errorMsg := fmt.Sprintf("proxy: dial upstream failed - error: %v, type: %T, upstream: %s, network: %s, client: %s, identity: %s, use_dialer_data: %v",
-					err, err, r.Upstream, upstreamNetwork, c.RemoteAddr(), c.IdentityData().DisplayName, r.UseDialerData)
+				errorMsg := fmt.Sprintf("proxy: dial upstream failed - error: %v, type: %T, upstream: %s, network: %s, client: %s, identity: %s, fetch_dialer_data: %v",
+					err, err, r.Upstream, upstreamNetwork, c.RemoteAddr(), c.IdentityData().DisplayName, r.FetchDialerData != nil)
 				r.Log.Error(errorMsg)
 				_ = r.l.Disconnect(c, fmt.Sprintf("Unable to connect to upstream server: %v", err.Error()))
 			}
