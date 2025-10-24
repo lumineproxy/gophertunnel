@@ -5,8 +5,8 @@ go 1.24.0
 require (
 	github.com/coder/websocket v1.8.14
 	github.com/df-mc/go-nethernet v0.0.0-20250326113854-da40ae9a1339
-	github.com/df-mc/go-playfab v0.0.0-20240902102459-2f8b5cd02173
-	github.com/df-mc/go-xsapi v0.0.0-20240902102602-e7c4bffb955f
+	github.com/df-mc/go-playfab v1.0.0
+	github.com/df-mc/go-xsapi v1.0.1
 	github.com/df-mc/jsonc v1.0.5
 	github.com/go-gl/mathgl v1.2.0
 	github.com/go-jose/go-jose/v4 v4.1.3
@@ -42,8 +42,4 @@ require (
 	golang.org/x/sys v0.37.0 // indirect
 )
 
-replace (
-	github.com/df-mc/go-nethernet => github.com/lumineproxy/go-nethernet v0.0.0-20251024044000-f3860133179b
-	github.com/df-mc/go-playfab => github.com/lactyy/go-playfab v0.0.0-20240911042657-037f6afe426f
-	github.com/df-mc/go-xsapi => github.com/lactyy/go-xsapi v0.0.0-20240911052022-1b9dffef64ab
-)
+replace github.com/df-mc/go-nethernet => github.com/lumineproxy/go-nethernet v0.0.0-20251024044000-f3860133179b

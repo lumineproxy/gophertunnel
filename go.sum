@@ -4,6 +4,10 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/df-mc/go-nethernet v0.0.0-20250326113854-da40ae9a1339 h1:4xyCykphezCW8p7fHYcNwQmGnPeFGdJYQ2E2PCvKMX4=
 github.com/df-mc/go-nethernet v0.0.0-20250326113854-da40ae9a1339/go.mod h1:ZZI4ySBVAdbRfdZzxgBPaWcnqKglsxArW1gQbPfOXow=
+github.com/df-mc/go-playfab v0.0.0-20240902102459-2f8b5cd02173/go.mod h1:18WY112N13bImvUbit9ZUC5cmvqggxlsgV96AqmM1kE=
+github.com/df-mc/go-playfab v1.0.0/go.mod h1:nGOlE+JFGOH5Z0iidEgJapHhndFi/oNk17RN9pKCF+k=
+github.com/df-mc/go-xsapi v0.0.0-20240902102602-e7c4bffb955f/go.mod h1:5M0+2xDLeLQ3cbM+w92R5/gYM1IaSuxoOle9UXN1HB0=
+github.com/df-mc/go-xsapi v1.0.1/go.mod h1:uKC/a/2/JOamgRDezvgVe7OmXdqERUfmCcIWAOp9hPA=
 github.com/df-mc/jsonc v1.0.5 h1:O7oh07kbS5AYY+l2Fji6l4h0iHcdjKbxCtK5VlZlLMU=
 github.com/df-mc/jsonc v1.0.5/go.mod h1:+Q++JuCE9IKiP8v7sWImdf/RjQX0nfXyfX6PdfTTmc4=
 github.com/go-gl/mathgl v1.2.0 h1:v2eOj/y1B2afDxF6URV1qCYmo1KW08lAMtTbOn3KXCY=
