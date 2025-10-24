@@ -22,6 +22,8 @@ github.com/lactyy/go-playfab v0.0.0-20240911042657-037f6afe426f h1:0emwbOsvMyx3A
 github.com/lactyy/go-playfab v0.0.0-20240911042657-037f6afe426f/go.mod h1:nGOlE+JFGOH5Z0iidEgJapHhndFi/oNk17RN9pKCF+k=
 github.com/lactyy/go-xsapi v0.0.0-20240911052022-1b9dffef64ab h1:Nl88ngY62OyM0ukw/0c+EYeRN8MDnDrDINEHhc2UdBM=
 github.com/lactyy/go-xsapi v0.0.0-20240911052022-1b9dffef64ab/go.mod h1:uKC/a/2/JOamgRDezvgVe7OmXdqERUfmCcIWAOp9hPA=
+github.com/lumineproxy/go-nethernet v0.0.0-20250326113854-da40ae9a1339/go.mod h1:ZZI4ySBVAdbRfdZzxgBPaWcnqKglsxArW1gQbPfOXow=
+github.com/lumineproxy/go-nethernet v0.0.0-20251024044000-f3860133179b/go.mod h1:ZZI4ySBVAdbRfdZzxgBPaWcnqKglsxArW1gQbPfOXow=
 github.com/muhammadmuzzammil1998/jsonc v1.0.0 h1:8o5gBQn4ZA3NBA9DlTujCj2a4w0tqWrPVjDwhzkgTIs=
 github.com/muhammadmuzzammil1998/jsonc v1.0.0/go.mod h1:saF2fIVw4banK0H4+/EuqfFLpRnoy5S+ECwTOCcRcSU=
 github.com/pelletier/go-toml v1.9.5 h1:4yBQzkHv+7BHq2PQUZF3Mx0IYxG7LsP222s7Agd3ve8=

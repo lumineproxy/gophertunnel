@@ -43,6 +43,7 @@ require (
 )
 
 replace (
+	github.com/df-mc/go-nethernet => github.com/lumineproxy/go-nethernet v0.0.0-20251024044000-f3860133179b
 	github.com/df-mc/go-playfab => github.com/lactyy/go-playfab v0.0.0-20240911042657-037f6afe426f
 	github.com/df-mc/go-xsapi => github.com/lactyy/go-xsapi v0.0.0-20240911052022-1b9dffef64ab
 )

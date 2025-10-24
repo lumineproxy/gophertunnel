@@ -2,14 +2,15 @@ package room
 
 import (
 	"errors"
-	"github.com/df-mc/go-nethernet"
-	"github.com/sandertv/gophertunnel/minecraft"
-	"github.com/sandertv/gophertunnel/minecraft/room/internal"
 	"log/slog"
 	"net"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/df-mc/go-nethernet"
+	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/room/internal"
 )
 
 // ListenConfig holds the configuration for wrapping a [minecraft.NetworkListener] with additional functionality.
@@ -95,9 +96,13 @@ func (l *Listener) ServerStatus(server minecraft.ServerStatus) {
 			if status.TransportLayer == 0 {
 				status.TransportLayer = TransportLayerNetherNet
 			}
+			networkID, err := strconv.ParseUint(addr.NetworkID, 10, 64)
+			if err != nil {
+				panic(err)
+			}
 			status.SupportedConnections = append(status.SupportedConnections, Connection{
 				ConnectionType: ConnectionTypeWebSocketsWebRTCSignaling,
-				NetherNetID:    addr.NetworkID,
+				NetherNetID:    networkID,
 			})
 		case *net.UDPAddr:
 			if status.TransportLayer == 0 {
