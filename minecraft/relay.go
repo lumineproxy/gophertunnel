@@ -17,9 +17,6 @@ import (
 
 // Relay is a proxy that can be used to listen for incoming connections and forward them to a remote server.
 type Relay struct {
-	// Logger is the LumineLogger that will be used to report errors. If nil, errors are not reported.
-	Logger *log.LumineLogger
-
 	// ListenConfig is the configuration for the listener that accepts client connections.
 	ListenConfig ListenConfig
 
@@ -115,21 +112,19 @@ func (r *Relay) Listen(network, address string) error {
 				_, err = d.DialHandshake(upstreamNetwork, r.Upstream)
 			}
 			if err != nil {
-				if r.Logger != nil {
-					r.Logger.Error(err, "failed to connect to upstream server", log.LogContext{
-						"component":                 "relay",
-						"operation":                 "dial_upstream",
-						"upstream":                  r.Upstream,
-						"network":                   upstreamNetwork,
-						"client_addr":               c.RemoteAddr().String(),
-						"client_identity":           c.IdentityData().DisplayName,
-						"client_logged_in":          c.loggedIn,
-						"client_handshake_complete": c.handshakeComplete,
-						"fetch_dialer_data":         r.FetchDialerData != nil,
-						"client_xuid":               c.IdentityData().XUID,
-						"client_uuid":               c.IdentityData().Identity,
-					})
-				}
+				log.Error(err, "failed to connect to upstream server", log.LogContext{
+					"component":                 "relay",
+					"operation":                 "dial_upstream",
+					"upstream":                  r.Upstream,
+					"network":                   upstreamNetwork,
+					"client_addr":               c.RemoteAddr().String(),
+					"client_identity":           c.IdentityData().DisplayName,
+					"client_logged_in":          c.loggedIn,
+					"client_handshake_complete": c.handshakeComplete,
+					"fetch_dialer_data":         r.FetchDialerData != nil,
+					"client_xuid":               c.IdentityData().XUID,
+					"client_uuid":               c.IdentityData().Identity,
+				})
 				_ = r.l.Disconnect(c, fmt.Sprintf("Unable to connect to upstream server: %v", err.Error()))
 			}
 		}()
@@ -170,27 +165,25 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 				// Source connection is closed, don't log this error
 			default:
 				if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isNormalDisconnectError(err) {
-					if r.Logger != nil {
-						direction := "client->server"
-						if !isClientToServer {
-							direction = "server->client"
-						}
-						r.Logger.Error(err, "failed to read packet", log.LogContext{
-							"component":              "relay",
-							"operation":              "read_packet",
-							"direction":              direction,
-							"src_addr":               src.RemoteAddr().String(),
-							"dst_addr":               dst.RemoteAddr().String(),
-							"src_identity":           src.IdentityData().DisplayName,
-							"dst_identity":           dst.IdentityData().DisplayName,
-							"src_logged_in":          src.loggedIn,
-							"dst_logged_in":          dst.loggedIn,
-							"src_handshake_complete": src.handshakeComplete,
-							"dst_handshake_complete": dst.handshakeComplete,
-							"src_xuid":               src.IdentityData().XUID,
-							"dst_xuid":               dst.IdentityData().XUID,
-						})
+					direction := "client->server"
+					if !isClientToServer {
+						direction = "server->client"
 					}
+					log.Error(err, "failed to read packet", log.LogContext{
+						"component":              "relay",
+						"operation":              "read_packet",
+						"direction":              direction,
+						"src_addr":               src.RemoteAddr().String(),
+						"dst_addr":               dst.RemoteAddr().String(),
+						"src_identity":           src.IdentityData().DisplayName,
+						"dst_identity":           dst.IdentityData().DisplayName,
+						"src_logged_in":          src.loggedIn,
+						"dst_logged_in":          dst.loggedIn,
+						"src_handshake_complete": src.handshakeComplete,
+						"dst_handshake_complete": dst.handshakeComplete,
+						"src_xuid":               src.IdentityData().XUID,
+						"dst_xuid":               dst.IdentityData().XUID,
+					})
 				}
 			}
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
@@ -213,12 +206,12 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 				case <-dst.Context().Done():
 					// Destination connection is closed, don't log this error
 				default:
-					if !errors.Is(err, io.EOF) && r.Logger != nil {
+					if !errors.Is(err, io.EOF) {
 						direction := "client->server"
 						if !isClientToServer {
 							direction = "server->client"
 						}
-						r.Logger.Error(err, "failed to handle packet", log.LogContext{
+						log.Error(err, "failed to handle packet", log.LogContext{
 							"component":    "relay",
 							"operation":    "handle_packet",
 							"direction":    direction,
@@ -242,12 +235,12 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 			case <-dst.Context().Done():
 				// Destination connection is closed, don't log this error
 			default:
-				if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isNormalDisconnectError(err) && r.Logger != nil {
+				if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isNormalDisconnectError(err) {
 					direction := "client->server"
 					if !isClientToServer {
 						direction = "server->client"
 					}
-					r.Logger.Error(err, "failed to write packet", log.LogContext{
+					log.Error(err, "failed to write packet", log.LogContext{
 						"component":              "relay",
 						"operation":              "write_packet",
 						"direction":              direction,
