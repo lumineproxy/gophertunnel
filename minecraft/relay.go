@@ -10,27 +10,15 @@ import (
 	"sync"
 
 	"github.com/lumineproxy/log"
+
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-// isNormalDisconnectError checks if the error is a normal disconnection that shouldn't be logged.
-func isNormalDisconnectError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-	return strings.Contains(errStr, "context canceled") ||
-		strings.Contains(errStr, "connection reset by peer") ||
-		strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "connection aborted")
-}
-
 // Relay is a proxy that can be used to listen for incoming connections and forward them to a remote server.
 type Relay struct {
-	// Log is a logger that will be used to log errors. If nil, a new logger will be created.
-	Log *log.LumineLogger
+	// Logger is the LumineLogger that will be used to report errors. If nil, errors are not reported.
+	Logger *log.LumineLogger
 
 	// ListenConfig is the configuration for the listener that accepts client connections.
 	ListenConfig ListenConfig
@@ -127,20 +115,21 @@ func (r *Relay) Listen(network, address string) error {
 				_, err = d.DialHandshake(upstreamNetwork, r.Upstream)
 			}
 			if err != nil {
-				ctx := log.NewContext().
-					WithComponent("relay").
-					WithOperation("dial_upstream").
-					WithExtra("upstream", r.Upstream).
-					WithExtra("network", upstreamNetwork).
-					WithExtra("client_addr", c.RemoteAddr().String()).
-					WithExtra("client_identity", c.IdentityData().DisplayName).
-					WithExtra("client_logged_in", c.loggedIn).
-					WithExtra("client_handshake_complete", c.handshakeComplete).
-					WithExtra("fetch_dialer_data", r.FetchDialerData != nil).
-					WithExtra("client_xuid", c.IdentityData().XUID).
-					WithExtra("client_uuid", c.IdentityData().Identity)
-
-				r.Log.LogErrorWithContext(err, "proxy: dial upstream failed", ctx)
+				if r.Logger != nil {
+					r.Logger.Error(err, "failed to connect to upstream server", log.LogContext{
+						"component":                 "relay",
+						"operation":                 "dial_upstream",
+						"upstream":                  r.Upstream,
+						"network":                   upstreamNetwork,
+						"client_addr":               c.RemoteAddr().String(),
+						"client_identity":           c.IdentityData().DisplayName,
+						"client_logged_in":          c.loggedIn,
+						"client_handshake_complete": c.handshakeComplete,
+						"fetch_dialer_data":         r.FetchDialerData != nil,
+						"client_xuid":               c.IdentityData().XUID,
+						"client_uuid":               c.IdentityData().Identity,
+					})
+				}
 				_ = r.l.Disconnect(c, fmt.Sprintf("Unable to connect to upstream server: %v", err.Error()))
 			}
 		}()
@@ -181,27 +170,27 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 				// Source connection is closed, don't log this error
 			default:
 				if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isNormalDisconnectError(err) {
-					direction := "client->server"
-					if !isClientToServer {
-						direction = "server->client"
+					if r.Logger != nil {
+						direction := "client->server"
+						if !isClientToServer {
+							direction = "server->client"
+						}
+						r.Logger.Error(err, "failed to read packet", log.LogContext{
+							"component":              "relay",
+							"operation":              "read_packet",
+							"direction":              direction,
+							"src_addr":               src.RemoteAddr().String(),
+							"dst_addr":               dst.RemoteAddr().String(),
+							"src_identity":           src.IdentityData().DisplayName,
+							"dst_identity":           dst.IdentityData().DisplayName,
+							"src_logged_in":          src.loggedIn,
+							"dst_logged_in":          dst.loggedIn,
+							"src_handshake_complete": src.handshakeComplete,
+							"dst_handshake_complete": dst.handshakeComplete,
+							"src_xuid":               src.IdentityData().XUID,
+							"dst_xuid":               dst.IdentityData().XUID,
+						})
 					}
-
-					ctx := log.NewContext().
-						WithComponent("relay").
-						WithOperation("read_packet").
-						WithExtra("direction", direction).
-						WithExtra("src_addr", src.RemoteAddr().String()).
-						WithExtra("dst_addr", dst.RemoteAddr().String()).
-						WithExtra("src_identity", src.IdentityData().DisplayName).
-						WithExtra("dst_identity", dst.IdentityData().DisplayName).
-						WithExtra("src_logged_in", src.loggedIn).
-						WithExtra("dst_logged_in", dst.loggedIn).
-						WithExtra("src_handshake_complete", src.handshakeComplete).
-						WithExtra("dst_handshake_complete", dst.handshakeComplete).
-						WithExtra("src_xuid", src.IdentityData().XUID).
-						WithExtra("dst_xuid", dst.IdentityData().XUID)
-
-					r.Log.LogErrorWithContext(err, "proxy: read packet error", ctx)
 				}
 			}
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
@@ -224,25 +213,24 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 				case <-dst.Context().Done():
 					// Destination connection is closed, don't log this error
 				default:
-					if !errors.Is(err, io.EOF) {
+					if !errors.Is(err, io.EOF) && r.Logger != nil {
 						direction := "client->server"
 						if !isClientToServer {
 							direction = "server->client"
 						}
-						ctx := log.NewContext().
-							WithComponent("relay").
-							WithOperation("handle_packet").
-							WithExtra("direction", direction).
-							WithExtra("packet_id", pk.ID()).
-							WithExtra("packet_type", fmt.Sprintf("%T", pk)).
-							WithExtra("src_addr", src.RemoteAddr().String()).
-							WithExtra("dst_addr", dst.RemoteAddr().String()).
-							WithExtra("src_identity", src.IdentityData().DisplayName).
-							WithExtra("dst_identity", dst.IdentityData().DisplayName).
-							WithExtra("src_xuid", src.IdentityData().XUID).
-							WithExtra("dst_xuid", dst.IdentityData().XUID)
-
-						r.Log.LogErrorWithContext(err, "proxy: handle packet error", ctx)
+						r.Logger.Error(err, "failed to handle packet", log.LogContext{
+							"component":    "relay",
+							"operation":    "handle_packet",
+							"direction":    direction,
+							"packet_id":    pk.ID(),
+							"packet_type":  fmt.Sprintf("%T", pk),
+							"src_addr":     src.RemoteAddr().String(),
+							"dst_addr":     dst.RemoteAddr().String(),
+							"src_identity": src.IdentityData().DisplayName,
+							"dst_identity": dst.IdentityData().DisplayName,
+							"src_xuid":     src.IdentityData().XUID,
+							"dst_xuid":     dst.IdentityData().XUID,
+						})
 					}
 				}
 				continue
@@ -254,30 +242,28 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 			case <-dst.Context().Done():
 				// Destination connection is closed, don't log this error
 			default:
-				if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isNormalDisconnectError(err) {
+				if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isNormalDisconnectError(err) && r.Logger != nil {
 					direction := "client->server"
 					if !isClientToServer {
 						direction = "server->client"
 					}
-
-					ctx := log.NewContext().
-						WithComponent("relay").
-						WithOperation("write_packet").
-						WithExtra("direction", direction).
-						WithExtra("packet_id", pk.ID()).
-						WithExtra("packet_type", fmt.Sprintf("%T", pk)).
-						WithExtra("src_addr", src.RemoteAddr().String()).
-						WithExtra("dst_addr", dst.RemoteAddr().String()).
-						WithExtra("src_identity", src.IdentityData().DisplayName).
-						WithExtra("dst_identity", dst.IdentityData().DisplayName).
-						WithExtra("src_logged_in", src.loggedIn).
-						WithExtra("dst_logged_in", dst.loggedIn).
-						WithExtra("src_handshake_complete", src.handshakeComplete).
-						WithExtra("dst_handshake_complete", dst.handshakeComplete).
-						WithExtra("src_xuid", src.IdentityData().XUID).
-						WithExtra("dst_xuid", dst.IdentityData().XUID)
-
-					r.Log.LogErrorWithContext(err, "proxy: write packet error", ctx)
+					r.Logger.Error(err, "failed to write packet", log.LogContext{
+						"component":              "relay",
+						"operation":              "write_packet",
+						"direction":              direction,
+						"packet_id":              pk.ID(),
+						"packet_type":            fmt.Sprintf("%T", pk),
+						"src_addr":               src.RemoteAddr().String(),
+						"dst_addr":               dst.RemoteAddr().String(),
+						"src_identity":           src.IdentityData().DisplayName,
+						"dst_identity":           dst.IdentityData().DisplayName,
+						"src_logged_in":          src.loggedIn,
+						"dst_logged_in":          dst.loggedIn,
+						"src_handshake_complete": src.handshakeComplete,
+						"dst_handshake_complete": dst.handshakeComplete,
+						"src_xuid":               src.IdentityData().XUID,
+						"dst_xuid":               dst.IdentityData().XUID,
+					})
 				}
 			}
 			// If this error is a DisconnectError, tell the listener to disconnect the other connection with the message.
@@ -292,4 +278,17 @@ func (r *Relay) forward(src, dst *Conn, isClientToServer bool, disconnectOnce *s
 			return
 		}
 	}
+}
+
+// isNormalDisconnectError checks if the error is a normal disconnection that shouldn't be logged.
+func isNormalDisconnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	return strings.Contains(errStr, "context canceled") ||
+		strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection aborted")
 }

@@ -8,6 +8,7 @@ require (
 	github.com/df-mc/go-playfab v1.0.0
 	github.com/df-mc/go-xsapi v1.0.1
 	github.com/df-mc/jsonc v1.0.5
+	github.com/getsentry/sentry-go v0.36.1
 	github.com/go-gl/mathgl v1.2.0
 	github.com/go-jose/go-jose/v4 v4.1.3
 	github.com/golang/snappy v1.0.0
@@ -21,8 +22,7 @@ require (
 )
 
 require (
-	github.com/getsentry/sentry-go v0.35.3 // indirect
-	github.com/lumineproxy/log v0.0.0-20251025031906-d0dce8de2193 // indirect
+	github.com/lumineproxy/log v0.0.0-20251025073257-83f3b1df9bf4 // indirect
 	github.com/pion/datachannel v1.5.10 // indirect
 	github.com/pion/dtls/v3 v3.0.7 // indirect
 	github.com/pion/ice/v4 v4.0.10 // indirect
