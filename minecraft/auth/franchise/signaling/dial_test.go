@@ -42,7 +42,7 @@ func TestDial(t *testing.T) {
 	if err := conn.Signal(&nethernet.Signal{
 		Type:         nethernet.SignalTypeOffer,
 		ConnectionID: rand.Uint64(),
-		NetworkID:    100, // Try signaling an offer to invalid network, We hopefully notify an Error.
+		NetworkID:    "100", // Try signaling an offer to invalid network, We hopefully notify an Error.
 	}); err != nil {
 		t.Fatalf("error signaling offer: %s", err)
 	}
